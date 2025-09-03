@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -777,6 +778,13 @@ const PracticeArea = ({
         setStatusText('Übung abgeschlossen. Ihr vollständiges Transkript wird verarbeitet.');
       }
     }, [dialogueState, dialogueTranscripts, onRecordingFinished, settings.mode]);
+
+    // This effect ensures the playback speed is updated whenever the slider changes.
+    useEffect(() => {
+        if (audioRef.current) {
+            audioRef.current.playbackRate = playbackSpeed;
+        }
+    }, [playbackSpeed]);
 
 
     // --- EDITING HANDLERS ---
