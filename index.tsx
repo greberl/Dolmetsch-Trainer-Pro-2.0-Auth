@@ -418,7 +418,7 @@ Gib dein Feedback als JSON-Objekt.
     <>
       <header className="app-header">
         <h1>Dolmetsch-Trainer Pro 2.0</h1>
-        <p>Ihre KI-gestützte Übungsumgebung.</p>
+        <p>Ihre KI-gestützte Übungsumgebung</p>
       </header>
       <main className="main-container">
         <SettingsPanel 
