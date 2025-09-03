@@ -694,6 +694,7 @@ const PracticeArea = ({
     const [playbackError, setPlaybackError] = useState<string | null>(null);
     const [recognitionError, setRecognitionError] = useState<string | null>(null);
     const [effectiveVoiceQuality, setEffectiveVoiceQuality] = useState(settings.voiceQuality);
+    const [premiumAudioSrc, setPremiumAudioSrc] = useState<string | null>(null);
 
     const [isEditingTranscript, setIsEditingTranscript] = useState(false);
     const [editedTranscript, setEditedTranscript] = useState(userTranscript);
@@ -706,6 +707,8 @@ const PracticeArea = ({
     const [dialogueState, setDialogueState] = useState<DialogueState>('idle');
     const [dialogueTranscripts, setDialogueTranscripts] = useState<string[]>([]);
     const [statusText, setStatusText] = useState('Klicken Sie auf ▶️, um das Interview zu starten.');
+    const [premiumDialogueAudio, setPremiumDialogueAudio] = useState<Record<number, string>>({});
+
 
     const recognitionRef = useRef<SpeechRecognition | null>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
@@ -745,6 +748,14 @@ const PracticeArea = ({
         setRecognitionError(null);
         setActiveTab('original');
         setEffectiveVoiceQuality(settings.voiceQuality);
+        setPremiumAudioSrc(null); // Reset cached audio
+        
+        // Also stop and clear any existing audio to prevent playing stale content
+        if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.src = "";
+        }
+        setIsPlaying(false);
 
         if (settings.mode === 'Gesprächsdolmetschen' && originalText) {
             const segments = parseDialogue(originalText, settings.sourceLang, settings.targetLang);
@@ -752,6 +763,7 @@ const PracticeArea = ({
             setDialogueState('idle');
             setCurrentSegmentIndex(-1);
             setDialogueTranscripts([]);
+            setPremiumDialogueAudio({}); // Reset dialogue audio cache
             setStatusText('Klicken Sie auf ▶️, um das Interview zu starten.');
         }
 
@@ -860,40 +872,48 @@ const PracticeArea = ({
         if (index < 0 || index >= dialogueSegments.length) return;
         
         const segment = dialogueSegments[index];
-        setDialogueState('playing');
-        setStatusText(`${segment.type} ${Math.floor(index / 2) + 1} wird vorgelesen...`);
+        
+        const playPremiumAudio = (src: string) => {
+            if (audioRef.current) {
+                audioRef.current.src = src;
+                audioRef.current.playbackRate = playbackSpeed;
+    
+                audioRef.current.onended = () => {
+                  setIsPlaying(false);
+                  setDialogueState('waiting_for_record');
+                  setStatusText(`Drücken Sie 🎤, um Ihre Verdolmetschung aufzunehmen.`);
+                  if(audioRef.current) audioRef.current.onended = null;
+                };
+    
+                audioRef.current.play().then(() => {
+                    setIsPlaying(true);
+                    setDialogueState('playing');
+                    setStatusText(`${segment.type} ${Math.floor(index / 2) + 1} wird vorgelesen...`);
+                }).catch(playError => {
+                    console.error("Audio playback failed in dialogue mode:", playError);
+                    setPlaybackError("Fehler beim Abspielen des Segments. Ihr Browser hat die Wiedergabe möglicherweise blockiert.");
+                    setIsPlaying(false);
+                    setDialogueState('idle');
+                    if (audioRef.current) audioRef.current.onended = null;
+                });
+            }
+        };
 
         if (effectiveVoiceQuality === 'Premium') {
+            if (premiumDialogueAudio[index]) {
+                playPremiumAudio(premiumDialogueAudio[index]);
+                return;
+            }
             try {
                 setDialogueState('synthesizing');
                 setStatusText(`Generiere Premium-Stimme für ${segment.type} ${Math.floor(index / 2) + 1}...`);
                 const audioContent = await synthesizeSpeechGoogleCloud(segment.text, segment.lang, process.env.API_KEY!);
                 const audioSrc = `data:audio/mp3;base64,${audioContent}`;
-                if (audioRef.current) {
-                    audioRef.current.src = audioSrc;
-                    audioRef.current.playbackRate = playbackSpeed;
-
-                    audioRef.current.onended = () => {
-                      setIsPlaying(false);
-                      setDialogueState('waiting_for_record');
-                      setStatusText(`Drücken Sie 🎤, um Ihre Verdolmetschung aufzunehmen.`);
-                      if(audioRef.current) audioRef.current.onended = null;
-                    };
-
-                    audioRef.current.play().then(() => {
-                        setIsPlaying(true);
-                        setDialogueState('playing');
-                        setStatusText(`${segment.type} ${Math.floor(index / 2) + 1} wird vorgelesen...`);
-                    }).catch(playError => {
-                        console.error("Audio playback failed in dialogue mode:", playError);
-                        setPlaybackError("Fehler beim Abspielen des Segments. Ihr Browser hat die Wiedergabe möglicherweise blockiert.");
-                        setIsPlaying(false);
-                        setDialogueState('idle'); // Reset state to allow restart
-                        if (audioRef.current) audioRef.current.onended = null; // Cleanup
-                    });
-                }
+                setPremiumDialogueAudio(prev => ({ ...prev, [index]: audioSrc }));
+                playPremiumAudio(audioSrc);
             } catch(err) {
                  console.error("Error playing premium segment:", err);
+                 setDialogueState('idle');
                  if (err instanceof TtsAuthError) {
                     if (isPremiumVoiceAvailable) {
                         onPremiumVoiceAuthError();
@@ -904,14 +924,13 @@ const PracticeArea = ({
                  } else {
                     setPlaybackError((err as Error).message);
                     setIsPlaying(false);
-                    setDialogueState('idle');
                  }
             }
         } else {
             playSegmentWithBrowserVoice(index);
         }
 
-    }, [dialogueSegments, playbackSpeed, effectiveVoiceQuality, playSegmentWithBrowserVoice, isPremiumVoiceAvailable, onPremiumVoiceAuthError]);
+    }, [dialogueSegments, playbackSpeed, effectiveVoiceQuality, playSegmentWithBrowserVoice, isPremiumVoiceAvailable, onPremiumVoiceAuthError, premiumDialogueAudio]);
 
     const advanceToNextSegment = useCallback(() => {
       const nextIndex = currentSegmentIndex + 1;
@@ -937,15 +956,30 @@ const PracticeArea = ({
             speechSynthesis.cancel();
             if (audioRef.current) audioRef.current.pause();
             setIsPlaying(false);
-        } else {
+        } else { // Not playing, so start playing
             setPlaybackError(null);
             
             if (effectiveVoiceQuality === 'Premium') {
+                // If we have already synthesized the audio, just play it.
+                if (premiumAudioSrc && audioRef.current) {
+                    audioRef.current.play().then(() => {
+                        setIsPlaying(true);
+                    }).catch(playError => {
+                        console.error("Audio playback failed:", playError);
+                        setPlaybackError("Fehler beim Abspielen der Audiodatei. Ihr Browser hat die Wiedergabe möglicherweise blockiert.");
+                        setIsPlaying(false);
+                    });
+                    return;
+                }
+
+                // Otherwise, synthesize for the first time
                 try {
                     setIsSynthesizing(true);
                     const audioContent = await synthesizeSpeechGoogleCloud(originalText, settings.sourceLang, process.env.API_KEY!);
                     setIsSynthesizing(false);
                     const audioSrc = `data:audio/mp3;base64,${audioContent}`;
+                    setPremiumAudioSrc(audioSrc); // Cache the audio source
+
                     if (audioRef.current) {
                         audioRef.current.src = audioSrc;
                         audioRef.current.playbackRate = playbackSpeed;
