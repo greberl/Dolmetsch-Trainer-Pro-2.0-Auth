@@ -1,6 +1,4 @@
 
-
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -105,7 +103,6 @@ const MODES: InterpretingMode[] = ["Vortragsdolmetschen", "Simultandolmetschen",
 const LANGUAGES: Language[] = ["Deutsch", "Englisch", "Russisch", "Spanisch", "Französisch"];
 const QA_LENGTHS: QALength[] = ["1-3 Sätze", "2-4 Sätze", "3-5 Sätze", "4-6 Sätze"];
 const SPEECH_LENGTHS: SpeechLength[] = ["Kurz", "Mittel", "Prüfung"];
-const VOICE_QUALITIES: VoiceQuality[] = ["Standard", "Premium"];
 
 const LANGUAGE_CODES: Record<Language, string> = {
   "Deutsch": "de-DE",
