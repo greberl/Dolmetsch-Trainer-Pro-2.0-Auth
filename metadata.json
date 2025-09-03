@@ -1,5 +1,5 @@
 {
-  "name": "Copy of Dolmetsch-Trainer Pro 2.0 - Speech API",
+  "name": "Dolmetsch-Trainer Pro 2.0 - Speech API",
   "description": "An AI-powered training environment for professional interpreters.",
   "requestFramePermissions": [
     "microphone"

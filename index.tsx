@@ -1,4 +1,6 @@
 
+
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -90,6 +92,14 @@ interface Feedback {
     errorAnalysis: ErrorAnalysisItem[];
 }
 
+// --- CUSTOM ERROR TYPE ---
+class TtsAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TtsAuthError';
+  }
+}
+
 // --- CONSTANTS ---
 const MODES: InterpretingMode[] = ["Vortragsdolmetschen", "Simultandolmetschen", "Shadowing", "Gesprächsdolmetschen", "Stegreifübersetzen"];
 const LANGUAGES: Language[] = ["Deutsch", "Englisch", "Russisch", "Spanisch", "Französisch"];
@@ -148,10 +158,11 @@ const synthesizeSpeechGoogleCloud = async (text: string, language: Language, api
     const langCode = LANGUAGE_CODES[language];
     const voiceName = WAVENET_VOICES[language];
 
-    const response = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`, {
+    const response = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize`, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': apiKey,
         },
         body: JSON.stringify({
             input: { text },
@@ -167,8 +178,13 @@ const synthesizeSpeechGoogleCloud = async (text: string, language: Language, api
 
     if (!response.ok) {
         const errorData = await response.json();
-        console.error("Google TTS API Error:", errorData);
-        throw new Error(`Fehler bei der Sprachsynthese: ${errorData.error?.message || 'Unbekannter Fehler'}`);
+        console.error("Google TTS API Error:", JSON.stringify(errorData, null, 2));
+        const message = `Fehler bei der Sprachsynthese: ${errorData.error?.message || 'Unbekannter Fehler'}`;
+        // Check for common API key-related errors to allow for graceful fallback.
+        if (response.status === 403 || response.status === 400 || errorData.error?.message?.toLowerCase().includes('api key not valid')) {
+             throw new TtsAuthError(message);
+        }
+        throw new Error(message);
     }
 
     const data = await response.json();
@@ -205,6 +221,7 @@ const App = () => {
     speechLength: 'Mittel',
     voiceQuality: 'Standard',
   });
+  const [isPremiumVoiceAvailable, setIsPremiumVoiceAvailable] = useState(true);
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
@@ -218,6 +235,10 @@ const App = () => {
   if (!ai) {
     return <ApiKeyErrorDisplay />;
   }
+
+  const handlePremiumVoiceAuthError = () => {
+    setIsPremiumVoiceAvailable(false);
+  };
 
   const generateText = async (currentSettings: Settings) => {
     setIsLoading(true);
@@ -403,7 +424,12 @@ Gib dein Feedback als JSON-Objekt.
         <p>Ihre KI-gestützte Übungsumgebung für professionelles Dolmetschen.</p>
       </header>
       <main className="main-container">
-        <SettingsPanel settings={settings} onStart={handleStart} disabled={isLoading} />
+        <SettingsPanel 
+            settings={settings} 
+            onStart={handleStart} 
+            disabled={isLoading}
+            isPremiumVoiceAvailable={isPremiumVoiceAvailable}
+        />
         <PracticeArea 
             key={originalText} // Remount component when text changes
             isLoading={isLoading} 
@@ -418,13 +444,20 @@ Gib dein Feedback als JSON-Objekt.
             error={error}
             settings={settings}
             exerciseStarted={exerciseStarted}
+            onPremiumVoiceAuthError={handlePremiumVoiceAuthError}
+            isPremiumVoiceAvailable={isPremiumVoiceAvailable}
          />
       </main>
     </>
   );
 };
 
-const SettingsPanel = ({ settings, onStart, disabled }: { settings: Settings, onStart: (settings: Settings, fileContent?: string) => void, disabled: boolean }) => {
+const SettingsPanel = ({ settings, onStart, disabled, isPremiumVoiceAvailable }: { 
+    settings: Settings, 
+    onStart: (settings: Settings, fileContent?: string) => void, 
+    disabled: boolean,
+    isPremiumVoiceAvailable: boolean 
+}) => {
     const [currentSettings, setCurrentSettings] = useState(settings);
     const [uploadedFile, setUploadedFile] = useState<{ name: string; content: string } | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -481,6 +514,12 @@ const SettingsPanel = ({ settings, onStart, disabled }: { settings: Settings, on
         }
     }, [currentSettings.mode, currentSettings.sourceLang, currentSettings.targetLang]);
 
+    useEffect(() => {
+        if (!isPremiumVoiceAvailable && currentSettings.voiceQuality === 'Premium') {
+            setCurrentSettings(prev => ({ ...prev, voiceQuality: 'Standard' }));
+        }
+    }, [isPremiumVoiceAvailable, currentSettings.voiceQuality]);
+
 
     return (
         <aside className="panel settings-panel">
@@ -496,8 +535,16 @@ const SettingsPanel = ({ settings, onStart, disabled }: { settings: Settings, on
                     <div className="form-group">
                         <label htmlFor="voiceQuality">Stimmenqualität</label>
                         <select id="voiceQuality" name="voiceQuality" className="form-control" value={currentSettings.voiceQuality} onChange={handleChange} disabled={disabled}>
-                            {VOICE_QUALITIES.map(q => <option key={q} value={q}>{q} ({q === 'Standard' ? 'Browser' : 'Google WaveNet'})</option>)}
+                            <option value="Standard">Standard (Browser)</option>
+                            <option value="Premium" disabled={!isPremiumVoiceAvailable}>
+                                Premium ({isPremiumVoiceAvailable ? 'Google WaveNet' : 'Nicht verfügbar'})
+                            </option>
                         </select>
+                        {!isPremiumVoiceAvailable && (
+                            <p className="form-text-hint">
+                                Premium-Stimme fehlgeschlagen. Prüfliste: (1) 'Cloud Text-to-Speech API' ist aktiviert. (2) Rechnungskonto ist verknüpft. (3) API-Schlüssel wurde im selben Projekt erstellt. (4) Der API-Schlüssel hat <strong>keine API-Einschränkungen</strong>, die den Dienst blockieren.
+                            </p>
+                        )}
                     </div>
                 )}
                 <div className="form-group">
@@ -626,10 +673,17 @@ const parseDialogue = (text: string, sourceLang: Language, targetLang: Language)
 };
 
 
-const PracticeArea = ({ isLoading, loadingMessage, originalText, setOriginalText, onRecordingFinished, onGetFeedback, userTranscript, setUserTranscript, feedback, error, settings, exerciseStarted }: {
+const PracticeArea = ({ 
+    isLoading, loadingMessage, originalText, setOriginalText, onRecordingFinished, 
+    onGetFeedback, userTranscript, setUserTranscript, feedback, error, settings, 
+    exerciseStarted, onPremiumVoiceAuthError, isPremiumVoiceAvailable 
+}: {
     isLoading: boolean; loadingMessage: string; originalText: string; setOriginalText: (text: string) => void;
-    onRecordingFinished: (rawTranscript: string) => void; onGetFeedback: () => void; userTranscript: string; setUserTranscript: (transcript: string) => void;
+    onRecordingFinished: (rawTranscript: string) => void; onGetFeedback: () => void; 
+    userTranscript: string; setUserTranscript: (transcript: string) => void;
     feedback: Feedback | null; error: string | null; settings: Settings; exerciseStarted: boolean;
+    onPremiumVoiceAuthError: () => void;
+    isPremiumVoiceAvailable: boolean;
 }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editedText, setEditedText] = useState(originalText);
@@ -642,6 +696,7 @@ const PracticeArea = ({ isLoading, loadingMessage, originalText, setOriginalText
     const [voicesLoaded, setVoicesLoaded] = useState(false);
     const [playbackError, setPlaybackError] = useState<string | null>(null);
     const [recognitionError, setRecognitionError] = useState<string | null>(null);
+    const [effectiveVoiceQuality, setEffectiveVoiceQuality] = useState(settings.voiceQuality);
 
     const [isEditingTranscript, setIsEditingTranscript] = useState(false);
     const [editedTranscript, setEditedTranscript] = useState(userTranscript);
@@ -692,6 +747,7 @@ const PracticeArea = ({ isLoading, loadingMessage, originalText, setOriginalText
         setPlaybackError(null);
         setRecognitionError(null);
         setActiveTab('original');
+        setEffectiveVoiceQuality(settings.voiceQuality);
 
         if (settings.mode === 'Gesprächsdolmetschen' && originalText) {
             const segments = parseDialogue(originalText, settings.sourceLang, settings.targetLang);
@@ -702,7 +758,7 @@ const PracticeArea = ({ isLoading, loadingMessage, originalText, setOriginalText
             setStatusText('Klicken Sie auf ▶️, um das Interview zu starten.');
         }
 
-    }, [originalText, userTranscript, settings.mode, settings.sourceLang, settings.targetLang]);
+    }, [originalText, userTranscript, settings.mode, settings.sourceLang, settings.targetLang, settings.voiceQuality]);
     
     useEffect(() => {
       if (dialogueState === 'finished' && settings.mode === 'Gesprächsdolmetschen') {
@@ -720,6 +776,87 @@ const PracticeArea = ({ isLoading, loadingMessage, originalText, setOriginalText
     const handleEditTranscript = () => setIsEditingTranscript(true);
     const handleSaveTranscript = () => { setUserTranscript(editedTranscript); setIsEditingTranscript(false); };
     
+    // --- STANDARD (BROWSER) VOICE PLAYBACK ---
+    const playWithBrowserVoice = useCallback(() => {
+        speechSynthesis.cancel();
+        setPlaybackTime(0);
+
+        const chunks = splitTextIntoChunks(originalText);
+        if (chunks.length === 0) return;
+        
+        const targetLang = LANGUAGE_CODES[settings.sourceLang];
+        const availableVoices = speechSynthesis.getVoices();
+        const targetVoices = availableVoices.filter(v => v.lang === targetLang);
+        let bestVoice: SpeechSynthesisVoice | undefined;
+        if (targetVoices.length > 0) bestVoice = targetVoices.find(v => v.localService) || targetVoices[0];
+        
+        const utterances = chunks.map(chunk => {
+            const utterance = new SpeechSynthesisUtterance(chunk);
+            utterance.lang = targetLang;
+            utterance.rate = playbackSpeed;
+            if (bestVoice) utterance.voice = bestVoice;
+            
+            utterance.onerror = (e: SpeechSynthesisErrorEvent) => {
+                if (e.error === 'interrupted') return;
+                console.error(`Speech synthesis error: ${e.error}. For language ${utterance.lang}.`, e);
+                let userMessage = 'Fehler bei der Sprachausgabe.';
+                if (e.error === 'language-unavailable') userMessage = `Keine Stimme für die Sprache '${settings.sourceLang}' in Ihrem Browser verfügbar.`;
+                setPlaybackError(userMessage);
+                setIsPlaying(false);
+                speechSynthesis.cancel();
+            };
+            return utterance;
+        });
+
+        if (utterances.length > 0) {
+            utterances[utterances.length - 1].onend = () => setIsPlaying(false);
+        }
+
+        utterances.forEach(utterance => speechSynthesis.speak(utterance));
+        setIsPlaying(true);
+    }, [originalText, settings.sourceLang, playbackSpeed]);
+
+    const playSegmentWithBrowserVoice = useCallback((index: number) => {
+        if (index < 0 || index >= dialogueSegments.length) return;
+        const segment = dialogueSegments[index];
+
+        speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(segment.text);
+        const targetLangCode = LANGUAGE_CODES[segment.lang];
+        const availableVoices = speechSynthesis.getVoices();
+        const targetVoices = availableVoices.filter(v => v.lang === targetLangCode);
+        let bestVoice: SpeechSynthesisVoice | undefined;
+        if (targetVoices.length > 0) {
+            bestVoice = targetVoices.find(v => v.localService) || targetVoices[0];
+        }
+        
+        utterance.lang = targetLangCode;
+        if (bestVoice) utterance.voice = bestVoice;
+        utterance.rate = playbackSpeed;
+
+        utterance.onstart = () => {
+            setIsPlaying(true);
+            setDialogueState('playing');
+            setStatusText(`${segment.type} ${Math.floor(index / 2) + 1} wird vorgelesen...`);
+        };
+        utterance.onend = () => {
+          setIsPlaying(false);
+          setDialogueState('waiting_for_record');
+          setStatusText(`Drücken Sie 🎤, um Ihre Verdolmetschung aufzunehmen.`);
+        };
+        
+        utterance.onerror = (e: SpeechSynthesisErrorEvent) => {
+          console.error(`Speech synthesis error: ${e.error}. For language ${utterance.lang}.`, e);
+          let userMessage = 'Fehler bei der Sprachausgabe.';
+          if (e.error === 'language-unavailable') userMessage = `Keine Stimme für die Sprache '${segment.lang}' in Ihrem Browser verfügbar.`;
+          setPlaybackError(userMessage);
+          setIsPlaying(false);
+          setDialogueState('idle');
+        };
+
+        speechSynthesis.speak(utterance);
+    }, [dialogueSegments, playbackSpeed]);
+
 
     // --- DIALOGUE MODE LOGIC ---
     const playSegment = useCallback(async (index: number) => {
@@ -729,7 +866,7 @@ const PracticeArea = ({ isLoading, loadingMessage, originalText, setOriginalText
         setDialogueState('playing');
         setStatusText(`${segment.type} ${Math.floor(index / 2) + 1} wird vorgelesen...`);
 
-        if (settings.voiceQuality === 'Premium') {
+        if (effectiveVoiceQuality === 'Premium') {
             try {
                 setDialogueState('synthesizing');
                 setStatusText(`Generiere Premium-Stimme für ${segment.type} ${Math.floor(index / 2) + 1}...`);
@@ -738,10 +875,6 @@ const PracticeArea = ({ isLoading, loadingMessage, originalText, setOriginalText
                 if (audioRef.current) {
                     audioRef.current.src = audioSrc;
                     audioRef.current.playbackRate = playbackSpeed;
-                    audioRef.current.play();
-                    setIsPlaying(true);
-                    setDialogueState('playing');
-                    setStatusText(`${segment.type} ${Math.floor(index / 2) + 1} wird vorgelesen...`);
 
                     audioRef.current.onended = () => {
                       setIsPlaying(false);
@@ -749,48 +882,39 @@ const PracticeArea = ({ isLoading, loadingMessage, originalText, setOriginalText
                       setStatusText(`Drücken Sie 🎤, um Ihre Verdolmetschung aufzunehmen.`);
                       if(audioRef.current) audioRef.current.onended = null;
                     };
+
+                    audioRef.current.play().then(() => {
+                        setIsPlaying(true);
+                        setDialogueState('playing');
+                        setStatusText(`${segment.type} ${Math.floor(index / 2) + 1} wird vorgelesen...`);
+                    }).catch(playError => {
+                        console.error("Audio playback failed in dialogue mode:", playError);
+                        setPlaybackError("Fehler beim Abspielen des Segments. Ihr Browser hat die Wiedergabe möglicherweise blockiert.");
+                        setIsPlaying(false);
+                        setDialogueState('idle'); // Reset state to allow restart
+                        if (audioRef.current) audioRef.current.onended = null; // Cleanup
+                    });
                 }
             } catch(err) {
-                 console.error(err);
-                 setPlaybackError((err as Error).message);
-                 setIsPlaying(false);
-                 setDialogueState('idle');
+                 console.error("Error playing premium segment:", err);
+                 if (err instanceof TtsAuthError) {
+                    if (isPremiumVoiceAvailable) {
+                        onPremiumVoiceAuthError();
+                        setPlaybackError("Premium-Stimme ist mit dem API-Schlüssel nicht verfügbar. Die App wechselt zur Standard-Stimme.");
+                    }
+                    setEffectiveVoiceQuality('Standard');
+                    playSegmentWithBrowserVoice(index);
+                 } else {
+                    setPlaybackError((err as Error).message);
+                    setIsPlaying(false);
+                    setDialogueState('idle');
+                 }
             }
         } else {
-            speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(segment.text);
-            const targetLangCode = LANGUAGE_CODES[segment.lang];
-            const availableVoices = speechSynthesis.getVoices();
-            const targetVoices = availableVoices.filter(v => v.lang === targetLangCode);
-            let bestVoice: SpeechSynthesisVoice | undefined;
-            if (targetVoices.length > 0) {
-                bestVoice = targetVoices.find(v => v.localService) || targetVoices[0];
-            }
-            
-            utterance.lang = targetLangCode;
-            if (bestVoice) utterance.voice = bestVoice;
-            utterance.rate = playbackSpeed;
-
-            utterance.onstart = () => setIsPlaying(true);
-            utterance.onend = () => {
-              setIsPlaying(false);
-              setDialogueState('waiting_for_record');
-              setStatusText(`Drücken Sie 🎤, um Ihre Verdolmetschung aufzunehmen.`);
-            };
-            
-            utterance.onerror = (e: SpeechSynthesisErrorEvent) => {
-              console.error(`Speech synthesis error: ${e.error}. For language ${utterance.lang}.`, e);
-              let userMessage = 'Fehler bei der Sprachausgabe.';
-              if (e.error === 'language-unavailable') userMessage = `Keine Stimme für die Sprache '${segment.lang}' in Ihrem Browser verfügbar.`;
-              setPlaybackError(userMessage);
-              setIsPlaying(false);
-              setDialogueState('idle');
-            };
-
-            speechSynthesis.speak(utterance);
+            playSegmentWithBrowserVoice(index);
         }
 
-    }, [dialogueSegments, playbackSpeed, settings.voiceQuality]);
+    }, [dialogueSegments, playbackSpeed, effectiveVoiceQuality, playSegmentWithBrowserVoice, isPremiumVoiceAvailable, onPremiumVoiceAuthError]);
 
     const advanceToNextSegment = useCallback(() => {
       const nextIndex = currentSegmentIndex + 1;
@@ -819,7 +943,7 @@ const PracticeArea = ({ isLoading, loadingMessage, originalText, setOriginalText
         } else {
             setPlaybackError(null);
             
-            if (settings.voiceQuality === 'Premium') {
+            if (effectiveVoiceQuality === 'Premium') {
                 try {
                     setIsSynthesizing(true);
                     const audioContent = await synthesizeSpeechGoogleCloud(originalText, settings.sourceLang, process.env.API_KEY!);
@@ -828,51 +952,30 @@ const PracticeArea = ({ isLoading, loadingMessage, originalText, setOriginalText
                     if (audioRef.current) {
                         audioRef.current.src = audioSrc;
                         audioRef.current.playbackRate = playbackSpeed;
-                        audioRef.current.play();
-                        setIsPlaying(true);
+                        audioRef.current.play().then(() => {
+                            setIsPlaying(true);
+                        }).catch(playError => {
+                            console.error("Audio playback failed:", playError);
+                            setPlaybackError("Fehler beim Abspielen der Audiodatei. Ihr Browser hat die Wiedergabe möglicherweise blockiert.");
+                            setIsPlaying(false);
+                        });
                     }
                 } catch (err) {
                     console.error("Premium playback error:", err);
-                    setPlaybackError((err as Error).message || "Fehler bei der Generierung der Premium-Stimme.");
+                    if (err instanceof TtsAuthError) {
+                        if (isPremiumVoiceAvailable) {
+                            onPremiumVoiceAuthError();
+                            setPlaybackError("Premium-Stimme ist mit dem API-Schlüssel nicht verfügbar. Die App wechselt zur Standard-Stimme.");
+                        }
+                        setEffectiveVoiceQuality('Standard');
+                        playWithBrowserVoice();
+                    } else {
+                        setPlaybackError((err as Error).message || "Fehler bei der Generierung der Premium-Stimme.");
+                    }
                     setIsSynthesizing(false);
                 }
             } else {
-                 speechSynthesis.cancel(); // Cancel any lingering speech
-                 setPlaybackTime(0); // Reset timer on new play
-
-                const chunks = splitTextIntoChunks(originalText);
-                if (chunks.length === 0) return;
-                
-                const targetLang = LANGUAGE_CODES[settings.sourceLang];
-                const availableVoices = speechSynthesis.getVoices();
-                const targetVoices = availableVoices.filter(v => v.lang === targetLang);
-                let bestVoice: SpeechSynthesisVoice | undefined;
-                if (targetVoices.length > 0) bestVoice = targetVoices.find(v => v.localService) || targetVoices[0];
-                
-                const utterances = chunks.map(chunk => {
-                    const utterance = new SpeechSynthesisUtterance(chunk);
-                    utterance.lang = targetLang;
-                    utterance.rate = playbackSpeed;
-                    if (bestVoice) utterance.voice = bestVoice;
-                    
-                    utterance.onerror = (e: SpeechSynthesisErrorEvent) => {
-                        if (e.error === 'interrupted') return;
-                        console.error(`Speech synthesis error: ${e.error}. For language ${utterance.lang}.`, e);
-                        let userMessage = 'Fehler bei der Sprachausgabe.';
-                        if (e.error === 'language-unavailable') userMessage = `Keine Stimme für die Sprache '${settings.sourceLang}' in Ihrem Browser verfügbar.`;
-                        setPlaybackError(userMessage);
-                        setIsPlaying(false);
-                        speechSynthesis.cancel();
-                    };
-                    return utterance;
-                });
-
-                if (utterances.length > 0) {
-                    utterances[utterances.length - 1].onend = () => setIsPlaying(false);
-                }
-
-                utterances.forEach(utterance => speechSynthesis.speak(utterance));
-                setIsPlaying(true);
+                 playWithBrowserVoice();
             }
         }
     };

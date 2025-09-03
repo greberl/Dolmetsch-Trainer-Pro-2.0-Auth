@@ -1,4 +1,5 @@
 
+
 :root {
   --primary-color: #007bff;
   --primary-hover-color: #0056b3;
@@ -119,6 +120,12 @@ h1 {
   outline: none;
   border-color: var(--primary-color);
   box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+}
+
+.form-text-hint {
+    font-size: 0.8rem;
+    color: var(--secondary-color);
+    margin-top: 0.5rem;
 }
 
 textarea.form-control {
