@@ -962,7 +962,9 @@ const PracticeArea = ({
             if (effectiveVoiceQuality === 'Premium') {
                 // If we have already synthesized the audio, just play it.
                 if (premiumAudioSrc && audioRef.current) {
-                    audioRef.current.currentTime = 0; // Reset audio to start before playing
+                    // Re-assigning the src is a robust way to ensure the audio element is ready to play again.
+                    audioRef.current.src = premiumAudioSrc;
+                    audioRef.current.currentTime = 0;
                     audioRef.current.play().then(() => {
                         setIsPlaying(true);
                     }).catch(playError => {
