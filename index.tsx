@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -724,7 +725,7 @@ const PracticeArea = ({
     const [statusText, setStatusText] = useState('Klicken Sie auf ▶️, um das Interview zu starten.');
     const [premiumDialogueAudio, setPremiumDialogueAudio] = useState<Record<number, string>>({});
 
-
+    const dialogueTranscriptsRef = useRef<string[]>([]);
     const recognitionRef = useRef<SpeechRecognition | null>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
     const timerRef = useRef<number | null>(null);
@@ -780,6 +781,7 @@ const PracticeArea = ({
             setDialogueState('idle');
             setCurrentSegmentIndex(-1);
             setDialogueTranscripts([]);
+            dialogueTranscriptsRef.current = [];
             setPremiumDialogueAudio({}); // Reset dialogue audio cache
             setStatusText('Klicken Sie auf ▶️, um das Interview zu starten.');
         }
@@ -947,13 +949,12 @@ const PracticeArea = ({
 
     }, [dialogueSegments, playbackSpeed, effectiveVoiceQuality, playSegmentWithBrowserVoice, isPremiumVoiceAvailable, onPremiumVoiceAuthError, premiumDialogueAudio]);
 
-    const advanceToNextSegment = useCallback((lastTranscriptSegment?: string) => {
+    const advanceToNextSegment = useCallback(() => {
       const nextIndex = currentSegmentIndex + 1;
       if (nextIndex >= dialogueSegments.length) {
           setDialogueState('finished');
-          // Manually construct the final transcript list to avoid state race condition
-          const finalTranscripts = [...dialogueTranscripts, lastTranscriptSegment || ''].filter(t => t.trim() !== '');
-          const fullTranscript = finalTranscripts.join(' ');
+          // Use the ref to get the complete and up-to-date list of transcripts
+          const fullTranscript = dialogueTranscriptsRef.current.filter(t => t.trim()).join(' ');
           onRecordingFinished(fullTranscript);
           setStatusText('Übung abgeschlossen. Ihr vollständiges Transkript wird verarbeitet.');
       } else {
@@ -961,7 +962,7 @@ const PracticeArea = ({
           setIsCurrentSegmentVisible(false);
           playSegment(nextIndex);
       }
-    }, [currentSegmentIndex, dialogueSegments, playSegment, dialogueTranscripts, onRecordingFinished]);
+    }, [currentSegmentIndex, dialogueSegments, playSegment, onRecordingFinished]);
 
     // --- GENERIC PLAYBACK & RECORDING ---
     const handlePlayPause = async () => {
@@ -1085,10 +1086,12 @@ const PracticeArea = ({
                     setIsRecording(false);
                     if (isDialogue) {
                         const currentTranscript = finalTranscript.trim();
-                        // Still update the state for consistency, but don't rely on it immediately
+                        // Add the latest transcript to the ref for reliable access
+                        dialogueTranscriptsRef.current.push(currentTranscript);
+                        // Also update the state for any UI that might depend on it
                         setDialogueTranscripts(prev => [...prev, currentTranscript]);
-                        // Pass the latest transcript directly to avoid race conditions
-                        advanceToNextSegment(currentTranscript);
+                        // Advance to the next step
+                        advanceToNextSegment();
                     } else {
                         await onRecordingFinished(finalTranscript);
                     }
