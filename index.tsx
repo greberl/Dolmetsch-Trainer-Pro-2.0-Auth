@@ -721,7 +721,6 @@ const PracticeArea = ({
     const [currentSegmentIndex, setCurrentSegmentIndex] = useState(-1);
     const [isCurrentSegmentVisible, setIsCurrentSegmentVisible] = useState(false);
     const [dialogueState, setDialogueState] = useState<DialogueState>('idle');
-    const [dialogueTranscripts, setDialogueTranscripts] = useState<string[]>([]);
     const [statusText, setStatusText] = useState('Klicken Sie auf ▶️, um das Interview zu starten.');
     const [premiumDialogueAudio, setPremiumDialogueAudio] = useState<Record<number, string>>({});
 
@@ -780,7 +779,6 @@ const PracticeArea = ({
             setDialogueSegments(segments);
             setDialogueState('idle');
             setCurrentSegmentIndex(-1);
-            setDialogueTranscripts([]);
             dialogueTranscriptsRef.current = [];
             setPremiumDialogueAudio({}); // Reset dialogue audio cache
             setStatusText('Klicken Sie auf ▶️, um das Interview zu starten.');
@@ -949,11 +947,14 @@ const PracticeArea = ({
 
     }, [dialogueSegments, playbackSpeed, effectiveVoiceQuality, playSegmentWithBrowserVoice, isPremiumVoiceAvailable, onPremiumVoiceAuthError, premiumDialogueAudio]);
 
-    const advanceToNextSegment = useCallback(() => {
+    const advanceToNextSegment = useCallback((latestTranscriptSegment?: string) => {
+      if (latestTranscriptSegment !== undefined) {
+          dialogueTranscriptsRef.current.push(latestTranscriptSegment);
+      }
       const nextIndex = currentSegmentIndex + 1;
+      
       if (nextIndex >= dialogueSegments.length) {
           setDialogueState('finished');
-          // Use the ref to get the complete and up-to-date list of transcripts
           const fullTranscript = dialogueTranscriptsRef.current.filter(t => t.trim()).join(' ');
           onRecordingFinished(fullTranscript);
           setStatusText('Übung abgeschlossen. Ihr vollständiges Transkript wird verarbeitet.');
@@ -1086,12 +1087,7 @@ const PracticeArea = ({
                     setIsRecording(false);
                     if (isDialogue) {
                         const currentTranscript = finalTranscript.trim();
-                        // Add the latest transcript to the ref for reliable access
-                        dialogueTranscriptsRef.current.push(currentTranscript);
-                        // Also update the state for any UI that might depend on it
-                        setDialogueTranscripts(prev => [...prev, currentTranscript]);
-                        // Advance to the next step
-                        advanceToNextSegment();
+                        advanceToNextSegment(currentTranscript);
                     } else {
                         await onRecordingFinished(finalTranscript);
                     }
