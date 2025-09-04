@@ -62,6 +62,12 @@ interface DialogueSegment {
     lang: Language;
 }
 
+interface StructuredDialogueResult {
+  originalSegment: DialogueSegment;
+  userInterpretation: string;
+  interpretationLang: Language;
+}
+
 interface Settings {
   mode: InterpretingMode;
   sourceLang: Language;
@@ -228,6 +234,7 @@ const App = () => {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [exerciseStarted, setExerciseStarted] = useState(false);
   const [dialogueFinished, setDialogueFinished] = useState(false);
+  const [structuredDialogueResults, setStructuredDialogueResults] = useState<StructuredDialogueResult[] | null>(null);
   
   if (!ai) {
     return <ApiKeyErrorDisplay />;
@@ -321,6 +328,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
       setSettings(newSettings);
       setExerciseStarted(false);
       setDialogueFinished(false);
+      setStructuredDialogueResults(null);
       if (newSettings.sourceType === 'upload' && fileContent) {
           setOriginalText(fileContent);
           setExerciseStarted(true);
@@ -442,6 +450,11 @@ Gib dein Feedback als JSON-Objekt.
       }
   }, [ai, userTranscript, originalText, settings]);
 
+  const handleDialogueFinished = (results: StructuredDialogueResult[]) => {
+      setDialogueFinished(true);
+      setStructuredDialogueResults(results);
+  };
+
   return (
     <>
       <header className="app-header">
@@ -464,6 +477,7 @@ Gib dein Feedback als JSON-Objekt.
                 isLoading={isLoading}
                 loadingMessage={loadingMessage}
                 error={error}
+                structuredResults={structuredDialogueResults}
               />
             ) : (
               <PracticeArea
@@ -479,7 +493,7 @@ Gib dein Feedback als JSON-Objekt.
                   settings={settings}
                   exerciseStarted={exerciseStarted}
                   onPremiumVoiceAuthError={handlePremiumVoiceAuthError}
-                  onDialogueFinished={() => setDialogueFinished(true)}
+                  onDialogueFinished={handleDialogueFinished}
               />
             )}
       </main>
@@ -743,7 +757,29 @@ const FeedbackDisplay = ({ feedback, getFeedback, userTranscript }: { feedback: 
     );
 };
 
-const DialogueResults = ({ originalText, userTranscript, feedback, getFeedback, isLoading, loadingMessage, error }: {
+const StructuredTranscriptDisplay = ({ results }: { results: StructuredDialogueResult[] }) => {
+    return (
+        <div className="structured-transcript">
+            {results.map((result, index) => (
+                <div key={index} className="transcript-segment">
+                    <div className="transcript-segment-header">
+                        <h4>{result.originalSegment.type} {Math.floor(index / 2) + 1} &ndash; Original ({result.originalSegment.lang})</h4>
+                    </div>
+                    <p className="transcript-segment-original">{result.originalSegment.text}</p>
+                    <div className="transcript-segment-header">
+                        <h4>Ihre Verdolmetschung ({result.interpretationLang})</h4>
+                    </div>
+                    <p className="transcript-segment-user">
+                        {result.userInterpretation || <em>Keine Aufnahme für diesen Abschnitt.</em>}
+                    </p>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+
+const DialogueResults = ({ originalText, userTranscript, feedback, getFeedback, isLoading, loadingMessage, error, structuredResults }: {
     originalText: string;
     userTranscript: string;
     feedback: Feedback | null;
@@ -751,6 +787,7 @@ const DialogueResults = ({ originalText, userTranscript, feedback, getFeedback, 
     isLoading: boolean;
     loadingMessage: string;
     error: string | null;
+    structuredResults: StructuredDialogueResult[] | null;
 }) => {
     const [activeTab, setActiveTab] = useState<PracticeAreaTab>('transcript');
 
@@ -785,7 +822,13 @@ const DialogueResults = ({ originalText, userTranscript, feedback, getFeedback, 
                         <div className="text-area"><p>{originalText}</p></div>
                     )}
                     {activeTab === 'transcript' && (
-                        <div className="text-area"><p>{userTranscript || "Kein Transkript generiert."}</p></div>
+                        <div className="text-area">
+                            {structuredResults ? (
+                                <StructuredTranscriptDisplay results={structuredResults} />
+                            ) : (
+                                <p>{userTranscript || "Kein Transkript generiert."}</p>
+                            )}
+                        </div>
                     )}
                     {activeTab === 'feedback' && (
                         <div className="text-area">
@@ -811,7 +854,7 @@ const PracticeArea = ({
   onRecordingFinished: (transcript: string) => void; getFeedback: () => void;
   userTranscript: string; feedback: Feedback | null; error: string | null; settings: Settings;
   exerciseStarted: boolean; onPremiumVoiceAuthError: () => void;
-  onDialogueFinished: () => void;
+  onDialogueFinished: (results: StructuredDialogueResult[]) => void;
 }) => {
   const [activeTab, setActiveTab] = useState<PracticeAreaTab>('original');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -824,7 +867,7 @@ const PracticeArea = ({
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
   const [dialogueState, setDialogueState] = useState<DialogueState>('idle');
   const [isSegmentTextVisible, setIsSegmentTextVisible] = useState(false);
-  const dialogueTranscriptsRef = useRef<string[]>([]);
+  const dialogueResultsRef = useRef<StructuredDialogueResult[]>([]);
 
   const stopPlayback = useCallback(() => {
     if (audioRef.current) {
@@ -953,20 +996,30 @@ const PracticeArea = ({
         });
         setDialogueSegments(segments);
         setCurrentSegmentIndex(0);
-        dialogueTranscriptsRef.current = [];
+        dialogueResultsRef.current = [];
         setDialogueState('ready'); 
     }
   }, [originalText, settings.mode, settings.sourceLang, settings.targetLang]);
   
   const advanceToNextSegment = useCallback((lastTranscript: string) => {
     setIsSegmentTextVisible(false);
-    dialogueTranscriptsRef.current.push(lastTranscript);
+    
+    // Store structured result
+    const originalSegment = dialogueSegments[currentSegmentIndex];
+    const interpretationLang = originalSegment.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang;
+    dialogueResultsRef.current.push({
+        originalSegment,
+        userInterpretation: lastTranscript,
+        interpretationLang,
+    });
+    
     const nextIndex = currentSegmentIndex + 1;
 
     if (nextIndex >= dialogueSegments.length) {
       setDialogueState('finished');
-      onRecordingFinished(dialogueTranscriptsRef.current.join(' '));
-      onDialogueFinished();
+      const fullTranscript = dialogueResultsRef.current.map(r => r.userInterpretation).join(' ');
+      onRecordingFinished(fullTranscript);
+      onDialogueFinished(dialogueResultsRef.current);
       return;
     }
 
@@ -976,7 +1029,7 @@ const PracticeArea = ({
     playText(nextSegment.text, nextSegment.lang, () => {
       setDialogueState('waiting_for_record');
     });
-  }, [currentSegmentIndex, dialogueSegments, onDialogueFinished, onRecordingFinished, playText]);
+  }, [currentSegmentIndex, dialogueSegments, onDialogueFinished, onRecordingFinished, playText, settings.sourceLang, settings.targetLang]);
 
   const startDialogue = useCallback(() => {
     if (dialogueSegments.length > 0) {

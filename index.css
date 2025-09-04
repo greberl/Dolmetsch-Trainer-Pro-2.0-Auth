@@ -521,6 +521,47 @@ textarea.form-control {
     height: 100%;
 }
 
+/* Structured Transcript Styles */
+.structured-transcript {
+  font-size: 1rem;
+}
+.transcript-segment {
+    margin-bottom: 2rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+.transcript-segment:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+.transcript-segment-header {
+    margin-bottom: 0.75rem;
+}
+.transcript-segment-header h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 0;
+}
+.transcript-segment-original,
+.transcript-segment-user {
+    padding: 0.75rem 1rem;
+    border-left: 3px solid #e9ecef;
+    margin: 0;
+}
+.transcript-segment-user {
+    background-color: #f8f9fa;
+    border-radius: 0 var(--border-radius) var(--border-radius) 0;
+    border-left: 3px solid var(--primary-color);
+    margin-top: 0.5rem;
+    white-space: pre-wrap;
+}
+
+.transcript-segment-user em {
+    color: var(--secondary-color);
+}
+
+
 /* API Key Modal Styles */
 .api-key-modal-overlay {
   position: fixed;
