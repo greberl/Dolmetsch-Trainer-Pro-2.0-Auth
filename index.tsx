@@ -1,7 +1,3 @@
-
-
-
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -231,6 +227,7 @@ const App = () => {
   const [userTranscript, setUserTranscript] = useState('');
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [exerciseStarted, setExerciseStarted] = useState(false);
+  const [activeTab, setActiveTab] = useState<PracticeAreaTab>('original');
   
   if (!ai) {
     return <ApiKeyErrorDisplay />;
@@ -301,6 +298,7 @@ const App = () => {
   const handleStart = (newSettings: Settings, fileContent?: string) => {
       setSettings(newSettings);
       setExerciseStarted(false);
+      setActiveTab('original');
       if (newSettings.sourceType === 'upload' && fileContent) {
           setOriginalText(fileContent);
           setExerciseStarted(true);
@@ -326,16 +324,18 @@ const App = () => {
         const response = await ai.models.generateContent({ model, contents: prompt });
         const punctuatedTranscript = response.text || rawTranscript;
         setUserTranscript(punctuatedTranscript);
+        setActiveTab('transcript');
     } catch (err) {
         console.error("Error processing transcript:", err);
         setError("Fehler bei der Verarbeitung des Transkripts. Zeige Roh-Version.");
         setUserTranscript(rawTranscript); // Fallback to raw transcript
+        setActiveTab('transcript');
     } finally {
         setIsLoading(false);
     }
   };
 
-  const getFeedback = async (setActiveTab: (tab: PracticeAreaTab) => void) => {
+  const getFeedback = async () => {
       if (!userTranscript) {
           setError("Kein Transkript vorhanden, um Feedback zu erhalten.");
           return;
@@ -451,6 +451,8 @@ Gib dein Feedback als JSON-Objekt.
             exerciseStarted={exerciseStarted}
             onPremiumVoiceAuthError={handlePremiumVoiceAuthError}
             isPremiumVoiceAvailable={isPremiumVoiceAvailable}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
          />
       </main>
     </>
@@ -681,14 +683,16 @@ const parseDialogue = (text: string, sourceLang: Language, targetLang: Language)
 const PracticeArea = ({ 
     isLoading, loadingMessage, originalText, setOriginalText, onRecordingFinished, 
     getFeedback, userTranscript, setUserTranscript, feedback, error, settings, 
-    exerciseStarted, onPremiumVoiceAuthError, isPremiumVoiceAvailable 
+    exerciseStarted, onPremiumVoiceAuthError, isPremiumVoiceAvailable, activeTab, setActiveTab
 }: {
     isLoading: boolean; loadingMessage: string; originalText: string; setOriginalText: (text: string) => void;
-    onRecordingFinished: (rawTranscript: string) => void; getFeedback: (setActiveTab: (tab: PracticeAreaTab) => void) => void; 
+    onRecordingFinished: (rawTranscript: string) => Promise<void>; getFeedback: () => void; 
     userTranscript: string; setUserTranscript: (transcript: string) => void;
     feedback: Feedback | null; error: string | null; settings: Settings; exerciseStarted: boolean;
     onPremiumVoiceAuthError: () => void;
     isPremiumVoiceAvailable: boolean;
+    activeTab: PracticeAreaTab;
+    setActiveTab: (tab: PracticeAreaTab) => void;
 }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editedText, setEditedText] = useState(originalText);
@@ -706,7 +710,6 @@ const PracticeArea = ({
 
     const [isEditingTranscript, setIsEditingTranscript] = useState(false);
     const [editedTranscript, setEditedTranscript] = useState(userTranscript);
-    const [activeTab, setActiveTab] = useState<PracticeAreaTab>('original');
 
     // State for Dialogue Interpreting mode
     const [dialogueSegments, setDialogueSegments] = useState<DialogueSegment[]>([]);
@@ -757,7 +760,6 @@ const PracticeArea = ({
         setEditedTranscript(userTranscript);
         setPlaybackError(null);
         setRecognitionError(null);
-        setActiveTab('original');
         setEffectiveVoiceQuality(settings.voiceQuality);
         setPremiumAudioSrc(null); // Reset cached audio
         
@@ -784,7 +786,6 @@ const PracticeArea = ({
       if (dialogueState === 'finished' && settings.mode === 'Gesprächsdolmetschen') {
         const fullTranscript = dialogueTranscripts.join(' ');
         onRecordingFinished(fullTranscript);
-        setActiveTab('transcript');
         setStatusText('Übung abgeschlossen. Ihr vollständiges Transkript wird verarbeitet.');
       }
     }, [dialogueState, dialogueTranscripts, onRecordingFinished, settings.mode]);
@@ -1076,7 +1077,7 @@ const PracticeArea = ({
                 }
             };
 
-            recognition.onend = () => {
+            recognition.onend = async () => {
                 const wasIntentional = (recognition as any)._intentionalStop;
                 if (wasIntentional) {
                     // User-initiated stop or an error occurred. Finalize.
@@ -1085,8 +1086,7 @@ const PracticeArea = ({
                         setDialogueTranscripts(prev => [...prev, finalTranscript.trim()]);
                         advanceToNextSegment();
                     } else {
-                        onRecordingFinished(finalTranscript);
-                        setActiveTab('transcript');
+                        await onRecordingFinished(finalTranscript);
                     }
                 } else {
                     // Timeout due to silence. Restart automatically.
@@ -1241,7 +1241,7 @@ const PracticeArea = ({
                                   <textarea className="transcript-textarea" readOnly value={userTranscript} />
                                 </div>
                                 <div className="feedback-actions">
-                                  <button className="btn btn-primary" onClick={() => getFeedback(setActiveTab)} disabled={isLoading}>Feedback anfordern</button>
+                                  <button className="btn btn-primary" onClick={getFeedback} disabled={isLoading}>Feedback anfordern</button>
                                 </div>
                               </div>
                         )}
@@ -1298,7 +1298,7 @@ const PracticeArea = ({
                                   <textarea className="transcript-textarea" readOnly value={userTranscript} />
                                 </div>
                                 <div className="feedback-actions">
-                                  <button className="btn btn-primary" onClick={() => getFeedback(setActiveTab)} disabled={isLoading}>Feedback anfordern</button>
+                                  <button className="btn btn-primary" onClick={getFeedback} disabled={isLoading}>Feedback anfordern</button>
                                 </div>
                               </div>
                         )}
@@ -1366,7 +1366,7 @@ const PracticeArea = ({
                           />
                         </div>
                         <div className="feedback-actions">
-                          <button className="btn btn-primary" onClick={() => getFeedback(setActiveTab)} disabled={isLoading || isEditingTranscript}>Feedback anfordern</button>
+                          <button className="btn btn-primary" onClick={getFeedback} disabled={isLoading || isEditingTranscript}>Feedback anfordern</button>
                         </div>
                     </div>
                 )}
