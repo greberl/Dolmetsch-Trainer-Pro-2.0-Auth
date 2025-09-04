@@ -310,9 +310,12 @@ const App = () => {
       }
   };
 
-  const handleRecordingFinished = async (rawTranscript: string) => {
+  const handleRecordingFinished = useCallback(async (rawTranscript: string) => {
     if (!rawTranscript.trim()) {
         setUserTranscript('');
+        // For non-dialogue modes, we still want to switch to the transcript tab
+        // to show the empty result. For dialogue, this call has no effect as it has a custom view.
+        setActiveTab('transcript');
         return;
     }
     setIsLoading(true);
@@ -321,6 +324,7 @@ const App = () => {
     setFeedback(null);
     try {
         const prompt = `Füge dem folgenden Text eine korrekte Zeichensetzung und Groß-/Kleischreibung hinzu, um ihn lesbar zu machen. Ändere keine Wörter. Der Text ist ein Transkript einer gesprochenen Aufnahme.\n\nRoh-Transkript: "${rawTranscript}"\n\nGib nur den formatierten Text zurück.`;
+        if (!ai) throw new Error("AI client not initialized");
         const response = await ai.models.generateContent({ model, contents: prompt });
         const punctuatedTranscript = response.text || rawTranscript;
         setUserTranscript(punctuatedTranscript);
@@ -333,9 +337,9 @@ const App = () => {
     } finally {
         setIsLoading(false);
     }
-  };
+  }, [ai]);
 
-  const getFeedback = async () => {
+  const getFeedback = useCallback(async () => {
       if (!userTranscript) {
           setError("Kein Transkript vorhanden, um Feedback zu erhalten.");
           return;
@@ -372,7 +376,7 @@ Gib dein Feedback als JSON-Objekt.
     -   **interpretation**: Das Transkript des Nutzers. **Füge hier zur besseren Lesbarkeit Satzzeichen ein**, aber bewerte den Nutzer nicht danach.
     -   **suggestion**: Ein Verbesserungsvorschlag, der sich auf Inhalt, Ausdruck oder Terminologie bezieht, nicht auf die Schriftform oder kleine Ausspracheabweichungen.
 `;
-        
+        if (!ai) throw new Error("AI client not initialized");
         const response = await ai.models.generateContent({
             model,
             contents: prompt,
@@ -420,7 +424,7 @@ Gib dein Feedback als JSON-Objekt.
       } finally {
           setIsLoading(false);
       }
-  };
+  }, [ai, userTranscript, originalText, settings]);
 
   return (
     <>
@@ -782,14 +786,6 @@ const PracticeArea = ({
 
     }, [originalText, userTranscript, settings.mode, settings.sourceLang, settings.targetLang, settings.voiceQuality]);
     
-    useEffect(() => {
-      if (dialogueState === 'finished' && settings.mode === 'Gesprächsdolmetschen') {
-        const fullTranscript = dialogueTranscripts.join(' ');
-        onRecordingFinished(fullTranscript);
-        setStatusText('Übung abgeschlossen. Ihr vollständiges Transkript wird verarbeitet.');
-      }
-    }, [dialogueState, dialogueTranscripts, onRecordingFinished, settings.mode]);
-
     // This effect ensures the playback speed is updated whenever the slider changes.
     useEffect(() => {
         if (audioRef.current) {
@@ -951,16 +947,21 @@ const PracticeArea = ({
 
     }, [dialogueSegments, playbackSpeed, effectiveVoiceQuality, playSegmentWithBrowserVoice, isPremiumVoiceAvailable, onPremiumVoiceAuthError, premiumDialogueAudio]);
 
-    const advanceToNextSegment = useCallback(() => {
+    const advanceToNextSegment = useCallback((lastTranscriptSegment?: string) => {
       const nextIndex = currentSegmentIndex + 1;
       if (nextIndex >= dialogueSegments.length) {
           setDialogueState('finished');
+          // Manually construct the final transcript list to avoid state race condition
+          const finalTranscripts = [...dialogueTranscripts, lastTranscriptSegment || ''].filter(t => t.trim() !== '');
+          const fullTranscript = finalTranscripts.join(' ');
+          onRecordingFinished(fullTranscript);
+          setStatusText('Übung abgeschlossen. Ihr vollständiges Transkript wird verarbeitet.');
       } else {
           setCurrentSegmentIndex(nextIndex);
           setIsCurrentSegmentVisible(false);
           playSegment(nextIndex);
       }
-    }, [currentSegmentIndex, dialogueSegments, playSegment]);
+    }, [currentSegmentIndex, dialogueSegments, playSegment, dialogueTranscripts, onRecordingFinished]);
 
     // --- GENERIC PLAYBACK & RECORDING ---
     const handlePlayPause = async () => {
@@ -1083,8 +1084,11 @@ const PracticeArea = ({
                     // User-initiated stop or an error occurred. Finalize.
                     setIsRecording(false);
                     if (isDialogue) {
-                        setDialogueTranscripts(prev => [...prev, finalTranscript.trim()]);
-                        advanceToNextSegment();
+                        const currentTranscript = finalTranscript.trim();
+                        // Still update the state for consistency, but don't rely on it immediately
+                        setDialogueTranscripts(prev => [...prev, currentTranscript]);
+                        // Pass the latest transcript directly to avoid race conditions
+                        advanceToNextSegment(currentTranscript);
                     } else {
                         await onRecordingFinished(finalTranscript);
                     }
