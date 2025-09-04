@@ -52,7 +52,7 @@ type SourceTextType = "ai" | "upload";
 type QALength = "1-3 Sätze" | "2-4 Sätze" | "3-5 Sätze" | "4-6 Sätze";
 type SpeechLength = "Kurz" | "Mittel" | "Prüfung";
 type VoiceQuality = "Standard" | "Premium";
-type DialogueState = 'idle' | 'synthesizing' | 'playing' | 'waiting_for_record' | 'recording' | 'finished' | 'starting';
+type DialogueState = 'idle' | 'ready' | 'synthesizing' | 'playing' | 'waiting_for_record' | 'recording' | 'finished' | 'starting';
 type PracticeAreaTab = 'original' | 'transcript' | 'feedback';
 
 
@@ -895,7 +895,7 @@ const PracticeArea = ({
     }
   }, [settings.voiceQuality, stopPlayback, onPremiumVoiceAuthError]);
   
-  const startRecording = useCallback((onRecognitionEnd: (transcript: string) => void) => {
+  const startRecording = useCallback((lang: Language, onRecognitionEnd: (transcript: string) => void) => {
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionAPI) {
         alert("Ihr Browser unterstützt die Web Speech API nicht. Bitte versuchen Sie es mit Chrome.");
@@ -903,7 +903,7 @@ const PracticeArea = ({
     }
     recognitionRef.current = new SpeechRecognitionAPI();
     const recognition = recognitionRef.current;
-    recognition.lang = LANGUAGE_CODES[settings.targetLang];
+    recognition.lang = LANGUAGE_CODES[lang];
     recognition.continuous = true;
     recognition.interimResults = false;
     
@@ -932,7 +932,7 @@ const PracticeArea = ({
     };
 
     recognition.start();
-  }, [settings.targetLang, settings.mode]);
+  }, [settings.mode]);
 
   const stopRecording = useCallback(() => {
       recognitionRef.current?.stop();
@@ -953,51 +953,38 @@ const PracticeArea = ({
         setDialogueSegments(segments);
         setCurrentSegmentIndex(0);
         dialogueTranscriptsRef.current = [];
-        setDialogueState('starting'); 
+        setDialogueState('ready'); 
     }
   }, [originalText, settings.mode, settings.sourceLang, settings.targetLang]);
   
-  const advanceToNextSegment = useCallback((lastTranscript?: string) => {
-      if (lastTranscript) {
-          dialogueTranscriptsRef.current.push(lastTranscript);
-      }
-      const nextIndex = currentSegmentIndex + 1;
-      
-      if (nextIndex >= dialogueSegments.length) {
-          setDialogueState('finished');
-          onRecordingFinished(dialogueTranscriptsRef.current.join(' '));
-          onDialogueFinished();
-          return;
-      }
-      
-      setCurrentSegmentIndex(nextIndex);
-      const nextSegment = dialogueSegments[nextIndex];
+  const advanceToNextSegment = useCallback((lastTranscript: string) => {
+    dialogueTranscriptsRef.current.push(lastTranscript);
+    const nextIndex = currentSegmentIndex + 1;
 
-      if (nextSegment.type === 'Frage') {
-          setDialogueState('synthesizing');
-          playText(nextSegment.text, nextSegment.lang, () => {
-              advanceToNextSegment();
-          });
-      } else { // Antwort
-          setDialogueState('waiting_for_record');
-      }
+    if (nextIndex >= dialogueSegments.length) {
+      setDialogueState('finished');
+      onRecordingFinished(dialogueTranscriptsRef.current.join(' '));
+      onDialogueFinished();
+      return;
+    }
 
+    setCurrentSegmentIndex(nextIndex);
+    const nextSegment = dialogueSegments[nextIndex];
+    setDialogueState('synthesizing');
+    playText(nextSegment.text, nextSegment.lang, () => {
+      setDialogueState('waiting_for_record');
+    });
   }, [currentSegmentIndex, dialogueSegments, onDialogueFinished, onRecordingFinished, playText]);
 
-
-  useEffect(() => {
-    if (dialogueState === 'starting' && dialogueSegments.length > 0) {
-        const firstSegment = dialogueSegments[0];
-        if (firstSegment.type === 'Frage') {
-            setDialogueState('synthesizing');
-            playText(firstSegment.text, firstSegment.lang, () => {
-                 advanceToNextSegment(); // Move to the first answer
-            });
-        } else {
-             setDialogueState('waiting_for_record');
-        }
+  const startDialogue = useCallback(() => {
+    if (dialogueSegments.length > 0) {
+      const firstSegment = dialogueSegments[0];
+      setDialogueState('synthesizing');
+      playText(firstSegment.text, firstSegment.lang, () => {
+        setDialogueState('waiting_for_record');
+      });
     }
-  }, [dialogueState, dialogueSegments, playText, advanceToNextSegment]);
+  }, [dialogueSegments, playText]);
 
 
   // Cleanup on unmount
@@ -1031,48 +1018,84 @@ const PracticeArea = ({
   }
 
   if (settings.mode === 'Gesprächsdolmetschen') {
-        const segment = dialogueSegments[currentSegmentIndex];
-        const stateMessages: Record<DialogueState, string> = {
-            idle: "Übung wird vorbereitet...",
-            starting: "Übung wird gestartet...",
-            synthesizing: `Spielt ${segment?.type || ''}...`,
-            playing: `Spielt ${segment?.type || ''}...`,
-            waiting_for_record: `Sie sind dran. Bitte übersetzen Sie die Antwort.`,
-            recording: 'Aufnahme läuft...',
-            finished: 'Übung abgeschlossen. Transkript wird verarbeitet.'
-        };
-        const canRecord = dialogueState === 'waiting_for_record';
-        const isRecording = dialogueState === 'recording';
+    const segment = dialogueSegments[currentSegmentIndex];
+    const segmentNumber = Math.floor(currentSegmentIndex / 2) + 1;
+    const canRecord = dialogueState === 'waiting_for_record';
 
-        return (
-             <section className="panel practice-area">
-                <div className="dialogue-practice-container">
-                    <div className="dialogue-status">{stateMessages[dialogueState]}</div>
-                    <div className="current-segment-display">
-                        {dialogueState === 'finished' || !segment ? (
-                             <p className="segment-text-hidden">Übung abgeschlossen</p>
-                        ) : segment.type === 'Frage' || (segment.type === 'Antwort' && dialogueState !== 'waiting_for_record' && dialogueState !== 'recording') ? (
-                            <p className="segment-text-hidden">Die Antwort wird verborgen, während Sie dolmetschen.</p>
-                        ) : (
-                            <p className="segment-text">{segment.text}</p>
-                        )}
-                    </div>
-                    <footer className="practice-footer">
-                        <button 
-                            className={`btn-record ${isRecording ? 'recording' : ''}`} 
-                            onClick={() => {
-                                if (isRecording) stopRecording();
-                                else if (canRecord) startRecording((transcript) => advanceToNextSegment(transcript));
-                            }}
-                            disabled={!canRecord && !isRecording}
-                        >
-                            <span className="mic-icon"></span>
-                            {isRecording ? 'Aufnahme stoppen' : 'Aufnahme starten'}
-                        </button>
-                    </footer>
+    let statusText = '';
+    let segmentInfo = '';
+    
+    if (segment) {
+        segmentInfo = `${segment.type} ${segmentNumber} / ${dialogueSegments.length / 2}`;
+    }
+
+    switch(dialogueState) {
+        case 'ready':
+            statusText = 'Die Dialogübung ist bereit.';
+            break;
+        case 'synthesizing':
+            statusText = `Spielt ${segmentInfo}...`;
+            break;
+        case 'waiting_for_record':
+            statusText = `Sie sind dran. Bitte dolmetschen Sie ${segmentInfo}.`;
+            break;
+        case 'recording':
+            statusText = `Aufnahme für ${segmentInfo} läuft...`;
+            break;
+        case 'finished':
+            statusText = 'Übung abgeschlossen. Transkript wird verarbeitet.';
+            break;
+        default:
+             statusText = 'Übung wird vorbereitet...';
+    }
+    
+    const recordingLang = segment?.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang;
+
+    return (
+         <section className="panel practice-area">
+            <div className="dialogue-practice-container">
+                <div className="dialogue-status">{statusText}</div>
+                <div className="current-segment-display">
+                    {dialogueState === 'ready' && (
+                        <button className="btn btn-primary" onClick={startDialogue}>Dialog starten</button>
+                    )}
+                    {dialogueState === 'synthesizing' && (
+                        <p className="segment-text-hidden">Bitte hören Sie aufmerksam zu...</p>
+                    )}
+                    {(dialogueState === 'waiting_for_record' || dialogueState === 'recording') && (
+                        <p className="segment-text-hidden">Sie sind an der Reihe zu dolmetschen...</p>
+                    )}
+                     {dialogueState === 'finished' && (
+                         <p className="segment-text-hidden">Übung abgeschlossen</p>
+                    )}
                 </div>
-             </section>
-        );
+                <footer className="practice-footer">
+                     <p className="recording-status-text">
+                        {isRecording
+                            ? 'Aufnahme läuft...'
+                            : canRecord
+                            ? 'Klicken Sie zum Starten der Aufnahme'
+                            : ''
+                        }
+                    </p>
+                    <button 
+                        className={`btn-record ${isRecording ? 'recording' : ''}`} 
+                        onClick={() => {
+                            if (isRecording) {
+                                stopRecording();
+                            } else if (canRecord) {
+                                startRecording(recordingLang, (transcript) => advanceToNextSegment(transcript));
+                            }
+                        }}
+                        disabled={!canRecord && !isRecording}
+                        aria-label={isRecording ? 'Aufnahme stoppen' : 'Aufnahme starten'}
+                    >
+                        <span className="mic-icon"></span>
+                    </button>
+                </footer>
+            </div>
+         </section>
+    );
   }
   
   // Default view for other modes
@@ -1117,18 +1140,28 @@ const PracticeArea = ({
       </div>
 
       <footer className="practice-footer">
+        <p className="recording-status-text">
+            {isRecording
+                ? 'Aufnahme läuft...'
+                : isPlaying
+                ? 'Wiedergabe läuft...'
+                : 'Klicken Sie zum Starten der Aufnahme'
+            }
+        </p>
         <button 
           className={`btn-record ${isRecording ? 'recording' : ''}`} 
           onClick={() => {
-              if (isRecording) stopRecording();
-              else startRecording(onRecordingFinished);
+              if (isRecording) {
+                stopRecording();
+              } else {
+                startRecording(settings.targetLang, onRecordingFinished);
+              }
           }}
           disabled={isPlaying}
+          aria-label={isRecording ? 'Aufnahme stoppen' : 'Aufnahme starten'}
         >
           <span className="mic-icon"></span>
-          {isRecording ? 'Aufnahme stoppen' : 'Aufnahme starten'}
         </button>
-         <p className="form-text-hint">Ihre Aufnahme wird lokal verarbeitet und nur zur Feedback-Generierung an die KI gesendet.</p>
       </footer>
     </section>
   );
