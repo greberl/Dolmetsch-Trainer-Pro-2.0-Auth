@@ -415,7 +415,7 @@ textarea.form-control {
 
 /* Feedback Display */
 .feedback-content {
-    /* Styles for feedback content */
+    font-size: 1rem;
 }
 .ratings-table {
     width: 100%;
@@ -459,6 +459,43 @@ textarea.form-control {
 .error-analysis-list strong {
     color: var(--primary-color);
 }
+
+/* Structured Feedback in Dialogue Mode */
+.structured-feedback h4 {
+    margin-top: 2rem;
+}
+
+.feedback-segment {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+}
+.feedback-segment:first-of-type {
+    margin-top: 1rem;
+    padding-top: 0;
+    border-top: none;
+}
+
+.feedback-segment-header h5 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+}
+
+.feedback-segment .error-analysis-list {
+    margin-top: 0;
+}
+
+.no-errors-in-segment {
+    font-size: 0.9rem;
+    color: var(--secondary-color);
+    padding: 1rem;
+    background-color: #f8f9fa;
+    border-radius: var(--border-radius);
+    border-left: 3px solid #28a745; /* Green for success */
+}
+
 
 /* Dialogue Mode Styles */
 .dialogue-practice-container {

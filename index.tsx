@@ -699,7 +699,12 @@ const splitTextIntoChunks = (text: string, maxLength = 250): string[] => {
     return chunks;
 };
 
-const FeedbackDisplay = ({ feedback, getFeedback, userTranscript }: { feedback: Feedback | null, getFeedback: () => void, userTranscript: string }) => {
+const FeedbackDisplay = ({ feedback, getFeedback, userTranscript, structuredResults }: { 
+    feedback: Feedback | null, 
+    getFeedback: () => void, 
+    userTranscript: string,
+    structuredResults?: StructuredDialogueResult[] | null
+}) => {
     if (!feedback) {
       return (
         <div className="controls-bar">
@@ -714,31 +719,84 @@ const FeedbackDisplay = ({ feedback, getFeedback, userTranscript }: { feedback: 
             <span key={i} className={`star ${i < rating ? 'filled' : ''}`}>&#9733;</span>
         ));
     };
+    
+    const renderRatingsAndSummary = () => (
+        <>
+            <h4>Zusammenfassung</h4>
+            <p>{feedback.summary}</p>
+            <h4>Bewertungen</h4>
+            <table className="ratings-table">
+              <tbody>
+                <tr>
+                  <td>Inhalt</td>
+                  <td>{renderStars(feedback.ratings.content)}</td>
+                  <td>{feedback.ratings.content}/10</td>
+                </tr>
+                <tr>
+                  <td>Ausdruck</td>
+                  <td>{renderStars(feedback.ratings.expression)}</td>
+                  <td>{feedback.ratings.expression}/10</td>
+                </tr>
+                 <tr>
+                  <td>Terminologie</td>
+                  <td>{renderStars(feedback.ratings.terminology)}</td>
+                  <td>{feedback.ratings.terminology}/10</td>
+                </tr>
+              </tbody>
+            </table>
+        </>
+    );
 
+    if (structuredResults && structuredResults.length > 0) {
+        // Structured Dialogue View
+        return (
+            <div className="feedback-content structured-feedback">
+                {renderRatingsAndSummary()}
+                {feedback.errorAnalysis.length > 0 ? (
+                    <>
+                        <h4>Detaillierte Fehleranalyse</h4>
+                        {structuredResults.map((result, index) => {
+                            const segmentErrors = feedback.errorAnalysis.filter(error => 
+                                result.originalSegment.text.includes(error.original)
+                            );
+
+                            return (
+                                <div key={index} className="feedback-segment">
+                                    <div className="feedback-segment-header">
+                                        <h5>{result.originalSegment.type} {Math.floor(index / 2) + 1}</h5>
+                                    </div>
+                                    {segmentErrors.length > 0 ? (
+                                        <ul className="error-analysis-list">
+                                            {segmentErrors.map((item, itemIndex) => (
+                                                <li key={itemIndex}>
+                                                  <p><strong>Original:</strong> {item.original}</p>
+                                                  <p><strong>Ihre Version:</strong> {item.interpretation}</p>
+                                                  <p><strong>Vorschlag:</strong> {item.suggestion}</p>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : (
+                                        <p className="no-errors-in-segment">
+                                            Keine spezifischen Fehler in diesem Abschnitt gefunden.
+                                        </p>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </>
+                ) : (
+                    <p className="no-errors-in-segment">
+                        Sehr gut! Die KI hat keine signifikanten Fehler in Ihrer Verdolmetschung gefunden.
+                    </p>
+                )}
+            </div>
+        );
+    }
+
+    // Default Unstructured View
     return (
       <div className="feedback-content">
-        <h4>Zusammenfassung</h4>
-        <p>{feedback.summary}</p>
-        <h4>Bewertungen</h4>
-        <table className="ratings-table">
-          <tbody>
-            <tr>
-              <td>Inhalt</td>
-              <td>{renderStars(feedback.ratings.content)}</td>
-              <td>{feedback.ratings.content}/10</td>
-            </tr>
-            <tr>
-              <td>Ausdruck</td>
-              <td>{renderStars(feedback.ratings.expression)}</td>
-              <td>{feedback.ratings.expression}/10</td>
-            </tr>
-             <tr>
-              <td>Terminologie</td>
-              <td>{renderStars(feedback.ratings.terminology)}</td>
-              <td>{feedback.ratings.terminology}/10</td>
-            </tr>
-          </tbody>
-        </table>
+        {renderRatingsAndSummary()}
         {feedback.errorAnalysis.length > 0 && (
           <>
             <h4>Fehleranalyse</h4>
@@ -832,7 +890,7 @@ const DialogueResults = ({ originalText, userTranscript, feedback, getFeedback, 
                     )}
                     {activeTab === 'feedback' && (
                         <div className="text-area">
-                           <FeedbackDisplay feedback={feedback} getFeedback={getFeedback} userTranscript={userTranscript} />
+                           <FeedbackDisplay feedback={feedback} getFeedback={getFeedback} userTranscript={userTranscript} structuredResults={structuredResults} />
                         </div>
                     )}
                 </div>
