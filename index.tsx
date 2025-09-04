@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -53,8 +52,8 @@ type SourceTextType = "ai" | "upload";
 type QALength = "1-3 Sätze" | "2-4 Sätze" | "3-5 Sätze" | "4-6 Sätze";
 type SpeechLength = "Kurz" | "Mittel" | "Prüfung";
 type VoiceQuality = "Standard" | "Premium";
-type DialogueState = 'idle' | 'synthesizing' | 'playing' | 'waiting_for_record' | 'recording' | 'finished';
-type PracticeAreaTab = 'original' | 'transcript' | 'feedback' | 'analysis';
+type DialogueState = 'idle' | 'synthesizing' | 'playing' | 'waiting_for_record' | 'recording' | 'finished' | 'starting';
+type PracticeAreaTab = 'original' | 'transcript' | 'feedback';
 
 
 interface DialogueSegment {
@@ -228,7 +227,7 @@ const App = () => {
   const [userTranscript, setUserTranscript] = useState('');
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [exerciseStarted, setExerciseStarted] = useState(false);
-  const [activeTab, setActiveTab] = useState<PracticeAreaTab>('original');
+  const [dialogueFinished, setDialogueFinished] = useState(false);
   
   if (!ai) {
     return <ApiKeyErrorDisplay />;
@@ -249,25 +248,27 @@ const App = () => {
     try {
         if (currentSettings.mode === 'Gesprächsdolmetschen') {
             const prompt = `
-Erstelle ein Interview-Skript für eine Dolmetschübung zum Thema "${currentSettings.topic}".
-Das Interview soll zwischen zwei Personen stattfinden. Es soll aus 6 Fragen und 6 Antworten bestehen.
-Die Länge der einzelnen Fragen und Antworten soll "${currentSettings.qaLength}" betragen.
+Du bist ein Assistent zur Erstellung von Dolmetschübungen. Erstelle ein Interview-Skript zum Thema "${currentSettings.topic}".
+Das Skript besteht aus genau 6 Fragen und 6 Antworten.
 
-**STRUKTUR UND SPRACHEN (SEHR WICHTIG):**
-- Frage 1: Sprache ${currentSettings.sourceLang}
-- Antwort 1: Sprache ${currentSettings.targetLang}
-- Frage 2: Sprache ${currentSettings.sourceLang}
-- Antwort 2: Sprache ${currentSettings.targetLang}
-- Frage 3: Sprache ${currentSettings.sourceLang}
-- Antwort 3: Sprache ${currentSettings.targetLang}
-- Frage 4: Sprache ${currentSettings.sourceLang}
-- Antwort 4: Sprache ${currentSettings.targetLang}
-- Frage 5: Sprache ${currentSettings.sourceLang}
-- Antwort 5: Sprache ${currentSettings.targetLang}
-- Frage 6: Sprache ${currentSettings.sourceLang}
-- Antwort 6: Sprache ${currentSettings.targetLang}
+**WICHTIGE REGELN FÜR DIE SPRACHEN:**
+- Alle 6 Fragen (Frage 1, Frage 2, etc.) MÜSSEN auf ${currentSettings.sourceLang} sein.
+- Alle 6 Antworten (Antwort 1, Antwort 2, etc.) MÜSSEN auf ${currentSettings.targetLang} sein.
+- Halte dich strikt an diesen Sprachenwechsel. Es darf keine Abweichungen geben.
 
-Formattiere die Ausgabe als reinen Text. Jede Zeile muss mit "Frage X:" oder "Antwort X:" beginnen. Gib nichts anderes als das Skript zurück.
+Die Länge jeder Frage und jeder Antwort soll ungefähr dem Umfang von "${currentSettings.qaLength}" entsprechen.
+
+**FORMATIERUNG (SEHR WICHTIG):**
+- Jede Zeile MUSS mit "Frage X:" oder "Antwort X:" beginnen, gefolgt vom Text.
+- Gib NUR das Skript zurück. Keinen einleitenden Text, keine Kommentare, keine Zusammenfassungen.
+
+**Beispiel für ${currentSettings.sourceLang}=Deutsch und ${currentSettings.targetLang}=Englisch:**
+Frage 1: Was sind die größten Herausforderungen beim Klimaschutz?
+Antwort 1: The biggest challenges are the transition to renewable energy and international cooperation.
+Frage 2: Welche Rolle spielt die Technologie dabei?
+Antwort 2: Technology plays a crucial role, for example in developing more efficient solar panels.
+Frage 3: Wie können einzelne Personen beitragen?
+Antwort 3: Individuals can contribute by reducing their carbon footprint, for instance, through less consumption and more recycling.
 `;
             const response = await ai.models.generateContent({ model, contents: prompt });
             setOriginalText(response.text || '');
@@ -319,7 +320,7 @@ Formattiere die Ausgabe als reinen Text. Jede Zeile muss mit "Frage X:" oder "An
   const handleStart = (newSettings: Settings, fileContent?: string) => {
       setSettings(newSettings);
       setExerciseStarted(false);
-      setActiveTab('original');
+      setDialogueFinished(false);
       if (newSettings.sourceType === 'upload' && fileContent) {
           setOriginalText(fileContent);
           setExerciseStarted(true);
@@ -334,9 +335,6 @@ Formattiere die Ausgabe als reinen Text. Jede Zeile muss mit "Frage X:" oder "An
   const handleRecordingFinished = useCallback(async (rawTranscript: string) => {
     if (!rawTranscript.trim()) {
         setUserTranscript('');
-        // For non-dialogue modes, we still want to switch to the transcript tab
-        // to show the empty result. For dialogue, this call has no effect as it has a custom view.
-        setActiveTab('transcript');
         return;
     }
     setIsLoading(true);
@@ -349,12 +347,10 @@ Formattiere die Ausgabe als reinen Text. Jede Zeile muss mit "Frage X:" oder "An
         const response = await ai.models.generateContent({ model, contents: prompt });
         const punctuatedTranscript = response.text || rawTranscript;
         setUserTranscript(punctuatedTranscript);
-        setActiveTab('transcript');
     } catch (err) {
         console.error("Error processing transcript:", err);
         setError("Fehler bei der Verarbeitung des Transkripts. Zeige Roh-Version.");
         setUserTranscript(rawTranscript); // Fallback to raw transcript
-        setActiveTab('transcript');
     } finally {
         setIsLoading(false);
     }
@@ -437,7 +433,6 @@ Gib dein Feedback als JSON-Objekt.
         }
         const parsedFeedback = JSON.parse(jsonStr);
         setFeedback(parsedFeedback);
-        setActiveTab('feedback');
 
       } catch (err) {
           console.error(err);
@@ -460,25 +455,34 @@ Gib dein Feedback als JSON-Objekt.
             disabled={isLoading}
             isPremiumVoiceAvailable={isPremiumVoiceAvailable}
         />
-        <PracticeArea 
-            key={originalText} // Remount component when text changes
-            isLoading={isLoading} 
-            loadingMessage={loadingMessage}
-            originalText={originalText}
-            setOriginalText={setOriginalText}
-            onRecordingFinished={handleRecordingFinished}
-            getFeedback={getFeedback}
-            userTranscript={userTranscript}
-            setUserTranscript={setUserTranscript}
-            feedback={feedback}
-            error={error}
-            settings={settings}
-            exerciseStarted={exerciseStarted}
-            onPremiumVoiceAuthError={handlePremiumVoiceAuthError}
-            isPremiumVoiceAvailable={isPremiumVoiceAvailable}
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-         />
+         {settings.mode === 'Gesprächsdolmetschen' && dialogueFinished ? (
+              <DialogueResults
+                originalText={originalText}
+                userTranscript={userTranscript}
+                feedback={feedback}
+                getFeedback={getFeedback}
+                isLoading={isLoading}
+                loadingMessage={loadingMessage}
+                error={error}
+              />
+            ) : (
+              <PracticeArea
+                  key={originalText} // Remount component when text changes
+                  isLoading={isLoading} 
+                  loadingMessage={loadingMessage}
+                  originalText={originalText}
+                  onRecordingFinished={handleRecordingFinished}
+                  getFeedback={getFeedback}
+                  userTranscript={userTranscript}
+                  feedback={feedback}
+                  error={error}
+                  settings={settings}
+                  exerciseStarted={exerciseStarted}
+                  onPremiumVoiceAuthError={handlePremiumVoiceAuthError}
+                  isPremiumVoiceAvailable={isPremiumVoiceAvailable}
+                  onDialogueFinished={() => setDialogueFinished(true)}
+              />
+            )}
       </main>
     </>
   );
@@ -665,912 +669,478 @@ const splitTextIntoChunks = (text: string, maxLength = 250): string[] => {
                 lastPunctuation = index;
             }
         }
-        
-        if (lastPunctuation !== -1) {
-            chunkEnd = lastPunctuation + 1;
+
+        if (lastPunctuation === -1) {
+            lastPunctuation = text.lastIndexOf(' ', chunkEnd);
+        }
+
+        if (lastPunctuation === -1 || lastPunctuation <= i) {
+            chunkEnd = i + maxLength;
         } else {
-            const lastSpace = text.lastIndexOf(' ', chunkEnd);
-            if (lastSpace > i) {
-                chunkEnd = lastSpace + 1;
-            }
+            chunkEnd = lastPunctuation + 1;
         }
         
         chunks.push(text.substring(i, chunkEnd));
         i = chunkEnd;
     }
-    return chunks.map(c => c.trim()).filter(c => c);
+    return chunks;
 };
 
-const parseDialogue = (text: string, sourceLang: Language, targetLang: Language): DialogueSegment[] => {
-    const segments: DialogueSegment[] = [];
-    const lines = text.split('\n').filter(line => line.trim() !== '');
-    let questionCounter = 0;
-    let answerCounter = 0;
-
-    lines.forEach((line) => {
-        const isQuestion = line.match(/^Frage\s*\d+:/i);
-        const isAnswer = line.match(/^Antwort\s*\d+:/i);
-        if (isQuestion) {
-            segments.push({
-                type: 'Frage',
-                text: line.replace(/^Frage\s*\d+:/i, '').trim(),
-                lang: sourceLang
-            });
-            questionCounter++;
-        } else if (isAnswer) {
-            segments.push({
-                type: 'Antwort',
-                text: line.replace(/^Antwort\s*\d+:/i, '').trim(),
-                lang: targetLang
-            });
-            answerCounter++;
-        }
-    });
-    // Fallback logic if languages were mixed up by AI, though new prompt should prevent this.
-    if (questionCounter > 0 && answerCounter > 0 && questionCounter === answerCounter) {
-        return segments;
+const FeedbackDisplay = ({ feedback, getFeedback, userTranscript }: { feedback: Feedback | null, getFeedback: () => void, userTranscript: string }) => {
+    if (!feedback) {
+      return (
+        <div className="controls-bar">
+          <button onClick={getFeedback} disabled={!userTranscript.trim()}>Feedback erhalten</button>
+          <p>{userTranscript ? '' : 'Noch kein Transkript vorhanden. Erstellen Sie eine Aufnahme und klicken Sie auf "Feedback erhalten".'}</p>
+        </div>
+      );
     }
-    // Simple alternation if parsing failed, as a safety net.
-    return lines.map((line, index) => {
-        const cleanText = line.replace(/^(Frage|Antwort)\s*\d+:/i, '').trim();
-        const isQuestionSegment = index % 2 === 0;
-        return {
-            type: isQuestionSegment ? 'Frage' : 'Antwort',
-            text: cleanText,
-            lang: isQuestionSegment ? sourceLang : targetLang
-        };
-    });
+
+    const renderStars = (rating: number) => {
+        return Array.from({ length: 10 }, (_, i) => (
+            <span key={i} className={`star ${i < rating ? 'filled' : ''}`}>&#9733;</span>
+        ));
+    };
+
+    return (
+      <div className="feedback-content">
+        <h4>Zusammenfassung</h4>
+        <p>{feedback.summary}</p>
+        <h4>Bewertungen</h4>
+        <table className="ratings-table">
+          <tbody>
+            <tr>
+              <td>Inhalt</td>
+              <td>{renderStars(feedback.ratings.content)}</td>
+              <td>{feedback.ratings.content}/10</td>
+            </tr>
+            <tr>
+              <td>Ausdruck</td>
+              <td>{renderStars(feedback.ratings.expression)}</td>
+              <td>{feedback.ratings.expression}/10</td>
+            </tr>
+             <tr>
+              <td>Terminologie</td>
+              <td>{renderStars(feedback.ratings.terminology)}</td>
+              <td>{feedback.ratings.terminology}/10</td>
+            </tr>
+          </tbody>
+        </table>
+        {feedback.errorAnalysis.length > 0 && (
+          <>
+            <h4>Fehleranalyse</h4>
+            <ul className="error-analysis-list">
+              {feedback.errorAnalysis.map((item, index) => (
+                <li key={index}>
+                  <p><strong>Original:</strong> {item.original}</p>
+                  <p><strong>Ihre Version:</strong> {item.interpretation}</p>
+                  <p><strong>Vorschlag:</strong> {item.suggestion}</p>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    );
 };
 
-const DialogueResults = ({
-    userTranscript,
-    feedback,
-    getFeedback,
-    isLoading,
-    error,
-}: {
+const DialogueResults = ({ originalText, userTranscript, feedback, getFeedback, isLoading, loadingMessage, error }: {
+    originalText: string;
     userTranscript: string;
     feedback: Feedback | null;
     getFeedback: () => void;
     isLoading: boolean;
+    loadingMessage: string;
     error: string | null;
 }) => {
-    const [activeTab, setActiveTab] = useState<'transcript' | 'feedback' | 'analysis'>('transcript');
+    const [activeTab, setActiveTab] = useState<PracticeAreaTab>('transcript');
 
     useEffect(() => {
-        if (feedback) {
-            setActiveTab('feedback');
+        if(userTranscript && !feedback) {
+            setActiveTab('transcript');
         }
-    }, [feedback]);
-
+    }, [userTranscript, feedback]);
+    
+    if (isLoading) {
+        return (
+            <section className="panel practice-area">
+                <div className="loading-overlay">
+                    <div className="spinner"></div>
+                    <p>{loadingMessage}</p>
+                </div>
+            </section>
+        );
+    }
 
     return (
-        <>
-            <div className="practice-header">
-                <h2>Übungsergebnisse</h2>
+        <section className="panel practice-area">
+            <div className="dialogue-results-wrapper">
+                {error && <div className="error-banner">{error}</div>}
+                <div className="tabs">
+                    <button className={`tab-btn ${activeTab === 'transcript' ? 'active' : ''}`} onClick={() => setActiveTab('transcript')}>Ihr Transkript</button>
+                    <button className={`tab-btn ${activeTab === 'feedback' ? 'active' : ''}`} onClick={() => setActiveTab('feedback')}>Feedback</button>
+                    <button className={`tab-btn ${activeTab === 'original' ? 'active' : ''}`} onClick={() => setActiveTab('original')}>Originalskript</button>
+                </div>
+                <div className="tab-content">
+                    {activeTab === 'original' && (
+                        <div className="text-area"><p>{originalText}</p></div>
+                    )}
+                    {activeTab === 'transcript' && (
+                        <div className="text-area"><p>{userTranscript || "Kein Transkript generiert."}</p></div>
+                    )}
+                    {activeTab === 'feedback' && (
+                        <div className="text-area">
+                           <FeedbackDisplay feedback={feedback} getFeedback={getFeedback} userTranscript={userTranscript} />
+                        </div>
+                    )}
+                </div>
+                 <footer className="practice-footer">
+                     <p className="form-text-hint">Übung abgeschlossen. Starten Sie eine neue Übung über das Einstellungsmenü.</p>
+                </footer>
             </div>
-            <nav className="tab-nav">
-                <button className={`tab-btn ${activeTab === 'transcript' ? 'active' : ''}`} onClick={() => setActiveTab('transcript')} disabled={!userTranscript}>
-                    Transkript
-                </button>
-                <button className={`tab-btn ${activeTab === 'feedback' ? 'active' : ''}`} onClick={() => setActiveTab('feedback')} disabled={!feedback}>
-                    KI-Feedback
-                </button>
-                <button className={`tab-btn ${activeTab === 'analysis' ? 'active' : ''}`} onClick={() => setActiveTab('analysis')} disabled={!feedback}>
-                    Fehleranalyse
-                </button>
-            </nav>
-            <div className="tab-content">
-                {activeTab === 'transcript' && (
-                    <div className="tab-pane-content">
-                        <div className="feedback-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                            <div className="transcript-header">
-                                <h3>Ihre Verdolmetschung (Gesamtes Transkript)</h3>
-                            </div>
-                            <textarea
-                                className="transcript-textarea"
-                                readOnly
-                                value={userTranscript}
-                                aria-label="Gesamtes Transkript Ihrer Verdolmetschung"
-                            />
-                        </div>
-                        <div className="feedback-actions">
-                            <button className="btn btn-primary" onClick={getFeedback} disabled={isLoading || !userTranscript}>Feedback anfordern</button>
-                        </div>
-                    </div>
-                )}
-                {activeTab === 'feedback' && feedback && (
-                     <div className="tab-pane-content">
-                        <div className="feedback-card" style={{marginBottom: '1.5rem'}}>
-                            <h3>KI-Feedback: Zusammenfassung</h3>
-                            <p>{feedback.summary}</p>
-                        </div>
-                        <div className="feedback-card ratings-panel">
-                             <h3>Bewertung</h3>
-                             <div className="ratings">
-                                <div className="rating-item">
-                                    <span>{feedback.ratings.content}/10</span>
-                                    <span>Inhalt</span>
-                                </div>
-                                <div className="rating-item">
-                                    <span>{feedback.ratings.expression}/10</span>
-                                    <span>Ausdruck</span>
-                                </div>
-                                <div className="rating-item">
-                                    <span>{feedback.ratings.terminology}/10</span>
-                                    <span>Terminologie</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-                {activeTab === 'analysis' && feedback && (
-                    <div className="tab-pane-content">
-                        <div className="feedback-card" style={{flexGrow: 1}}>
-                            <h3>Fehleranalyse</h3>
-                            {feedback.errorAnalysis?.length > 0 ? (
-                                <div className="error-analysis">
-                                <table>
-                                    <thead>
-                                        <tr><th>Original</th><th>Ihre Version</th><th>Vorschlag</th></tr>
-                                    </thead>
-                                    <tbody>
-                                        {feedback.errorAnalysis.map((err, i) => (
-                                            <tr key={i}><td>{err.original}</td><td>{err.interpretation}</td><td>{err.suggestion}</td></tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                                </div>
-                            ) : <p style={{paddingTop: '1rem'}}>Keine signifikanten Fehler gefunden.</p>}
-                        </div>
-                    </div>
-                )}
-            </div>
-            {error && <div className="error-message" style={{marginTop: '1rem'}}>{error}</div>}
-        </>
+        </section>
     );
 };
 
 
-const PracticeArea = ({ 
-    isLoading, loadingMessage, originalText, setOriginalText, onRecordingFinished, 
-    getFeedback, userTranscript, setUserTranscript, feedback, error, settings, 
-    exerciseStarted, onPremiumVoiceAuthError, isPremiumVoiceAvailable, activeTab, setActiveTab
+const PracticeArea = ({
+  isLoading, loadingMessage, originalText, onRecordingFinished, getFeedback,
+  userTranscript, feedback, error, settings, exerciseStarted,
+  onPremiumVoiceAuthError, isPremiumVoiceAvailable, onDialogueFinished,
 }: {
-    isLoading: boolean; loadingMessage: string; originalText: string; setOriginalText: (text: string) => void;
-    onRecordingFinished: (rawTranscript: string) => Promise<void>; getFeedback: () => void; 
-    userTranscript: string; setUserTranscript: (transcript: string) => void;
-    feedback: Feedback | null; error: string | null; settings: Settings; exerciseStarted: boolean;
-    onPremiumVoiceAuthError: () => void;
-    isPremiumVoiceAvailable: boolean;
-    activeTab: PracticeAreaTab;
-    setActiveTab: (tab: PracticeAreaTab) => void;
+  isLoading: boolean; loadingMessage: string; originalText: string;
+  onRecordingFinished: (transcript: string) => void; getFeedback: () => void;
+  userTranscript: string; feedback: Feedback | null; error: string | null; settings: Settings;
+  exerciseStarted: boolean; onPremiumVoiceAuthError: () => void;
+  isPremiumVoiceAvailable: boolean; onDialogueFinished: () => void;
 }) => {
-    const [isEditing, setIsEditing] = useState(false);
-    const [editedText, setEditedText] = useState(originalText);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [isRecording, setIsRecording] = useState(false);
-    const [isSynthesizing, setIsSynthesizing] = useState(false);
-    const [playbackTime, setPlaybackTime] = useState(0);
-    const [recordingTime, setRecordingTime] = useState(0);
-    const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
-    const [voicesLoaded, setVoicesLoaded] = useState(false);
-    const [playbackError, setPlaybackError] = useState<string | null>(null);
-    const [recognitionError, setRecognitionError] = useState<string | null>(null);
-    const [effectiveVoiceQuality, setEffectiveVoiceQuality] = useState(settings.voiceQuality);
-    const [premiumAudioSrc, setPremiumAudioSrc] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<PracticeAreaTab>('original');
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
 
-    const [isEditingTranscript, setIsEditingTranscript] = useState(false);
-    const [editedTranscript, setEditedTranscript] = useState(userTranscript);
+  // State for Dialogue Interpreting
+  const [dialogueSegments, setDialogueSegments] = useState<DialogueSegment[]>([]);
+  const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
+  const [dialogueState, setDialogueState] = useState<DialogueState>('idle');
+  const dialogueTranscriptsRef = useRef<string[]>([]);
 
-    // State for Dialogue Interpreting mode
-    const [dialogueSegments, setDialogueSegments] = useState<DialogueSegment[]>([]);
-    const [currentSegmentIndex, setCurrentSegmentIndex] = useState(-1);
-    const [isCurrentSegmentVisible, setIsCurrentSegmentVisible] = useState(false);
-    const [dialogueState, setDialogueState] = useState<DialogueState>('idle');
-    const [statusText, setStatusText] = useState('Klicken Sie auf ▶️, um das Interview zu starten.');
-    const [premiumDialogueAudio, setPremiumDialogueAudio] = useState<Record<number, string>>({});
+  const stopPlayback = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    window.speechSynthesis.cancel();
+    setIsPlaying(false);
+  }, []);
 
-    const dialogueTranscriptsRef = useRef<string[]>([]);
-    const recognitionRef = useRef<SpeechRecognition | null>(null);
-    const audioRef = useRef<HTMLAudioElement>(null);
-    const timerRef = useRef<number | null>(null);
+  const playText = useCallback(async (textToPlay: string, lang: Language, onEndedCallback?: () => void) => {
+    stopPlayback();
+    setIsPlaying(true);
 
-    const formatTime = (seconds: number) => new Date(seconds * 1000).toISOString().slice(14, 19);
-
-    // --- LIFECYCLE & SETUP ---
-    useEffect(() => {
-        const handleVoicesChanged = () => {
-            if (speechSynthesis.getVoices().length > 0) {
-                setVoicesLoaded(true);
-            }
+    if (settings.voiceQuality === 'Premium') {
+      try {
+        const audioContent = await synthesizeSpeechGoogleCloud(textToPlay, lang, process.env.API_KEY || '');
+        const audio = new Audio(`data:audio/mp3;base64,${audioContent}`);
+        audioRef.current = audio;
+        audio.play();
+        audio.onended = () => {
+            setIsPlaying(false);
+            if (onEndedCallback) onEndedCallback();
         };
-
-        speechSynthesis.onvoiceschanged = handleVoicesChanged;
-        handleVoicesChanged(); // Initial check in case voices are already loaded
-
-        // Cleanup on unmount
-        return () => {
-            speechSynthesis.onvoiceschanged = null;
-            speechSynthesis.cancel();
-            if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current.src = "";
-            }
-            if (recognitionRef.current) {
-                (recognitionRef.current as any)._intentionalStop = true;
-                recognitionRef.current.stop();
-            }
-            if (timerRef.current) clearInterval(timerRef.current);
-        };
-    }, []);
-
-
-    useEffect(() => {
-        setEditedText(originalText);
-        setEditedTranscript(userTranscript);
-        setPlaybackError(null);
-        setRecognitionError(null);
-        setEffectiveVoiceQuality(settings.voiceQuality);
-        setPremiumAudioSrc(null); // Reset cached audio
-        
-        // Also stop and clear any existing audio to prevent playing stale content
-        if (audioRef.current) {
-            audioRef.current.pause();
-            audioRef.current.src = "";
+      } catch (e) {
+        if (e instanceof TtsAuthError) {
+          onPremiumVoiceAuthError();
         }
+        console.error("Fehler bei der Premium-Sprachsynthese:", e);
         setIsPlaying(false);
+        if (onEndedCallback) onEndedCallback();
+      }
+    } else { // Standard voice
+      const chunks = splitTextIntoChunks(textToPlay);
+      let currentChunk = 0;
 
-        if (settings.mode === 'Gesprächsdolmetschen' && originalText) {
-            const segments = parseDialogue(originalText, settings.sourceLang, settings.targetLang);
-            setDialogueSegments(segments);
-            setDialogueState('idle');
-            setCurrentSegmentIndex(-1);
-            dialogueTranscriptsRef.current = [];
-            setPremiumDialogueAudio({}); // Reset dialogue audio cache
-            setStatusText('Klicken Sie auf ▶️, um das Interview zu starten.');
-        }
-
-    }, [originalText, userTranscript, settings.mode, settings.sourceLang, settings.targetLang, settings.voiceQuality]);
-    
-    // This effect ensures the playback speed is updated whenever the slider changes.
-    useEffect(() => {
-        if (audioRef.current) {
-            audioRef.current.playbackRate = playbackSpeed;
-        }
-    }, [playbackSpeed]);
-
-
-    // --- EDITING HANDLERS ---
-    const handleEdit = () => { setIsEditing(true); setEditedText(originalText); };
-    const handleSave = () => { setOriginalText(editedText); setIsEditing(false); };
-    const handleEditTranscript = () => setIsEditingTranscript(true);
-    const handleSaveTranscript = () => { setUserTranscript(editedTranscript); setIsEditingTranscript(false); };
-    
-    // --- STANDARD (BROWSER) VOICE PLAYBACK ---
-    const playWithBrowserVoice = useCallback(() => {
-        speechSynthesis.cancel();
-        setPlaybackTime(0);
-
-        const chunks = splitTextIntoChunks(originalText);
-        if (chunks.length === 0) return;
-        
-        const targetLang = LANGUAGE_CODES[settings.sourceLang];
-        const availableVoices = speechSynthesis.getVoices();
-        const targetVoices = availableVoices.filter(v => v.lang === targetLang);
-        let bestVoice: SpeechSynthesisVoice | undefined;
-        if (targetVoices.length > 0) bestVoice = targetVoices.find(v => v.localService) || targetVoices[0];
-        
-        const utterances = chunks.map(chunk => {
-            const utterance = new SpeechSynthesisUtterance(chunk);
-            utterance.lang = targetLang;
-            utterance.rate = playbackSpeed;
-            if (bestVoice) utterance.voice = bestVoice;
-            
-            utterance.onerror = (e: SpeechSynthesisErrorEvent) => {
-                if (e.error === 'interrupted') return;
-                console.error(`Speech synthesis error: ${e.error}. For language ${utterance.lang}.`, e);
-                let userMessage = 'Fehler bei der Sprachausgabe.';
-                if (e.error === 'language-unavailable') userMessage = `Keine Stimme für die Sprache '${settings.sourceLang}' in Ihrem Browser verfügbar.`;
-                setPlaybackError(userMessage);
-                setIsPlaying(false);
-                speechSynthesis.cancel();
-            };
-            return utterance;
-        });
-
-        if (utterances.length > 0) {
-            utterances[utterances.length - 1].onend = () => setIsPlaying(false);
-        }
-
-        utterances.forEach(utterance => speechSynthesis.speak(utterance));
-        setIsPlaying(true);
-    }, [originalText, settings.sourceLang, playbackSpeed]);
-
-    const playSegmentWithBrowserVoice = useCallback((index: number) => {
-        if (index < 0 || index >= dialogueSegments.length) return;
-        const segment = dialogueSegments[index];
-
-        speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(segment.text);
-        const targetLangCode = LANGUAGE_CODES[segment.lang];
-        const availableVoices = speechSynthesis.getVoices();
-        const targetVoices = availableVoices.filter(v => v.lang === targetLangCode);
-        let bestVoice: SpeechSynthesisVoice | undefined;
-        if (targetVoices.length > 0) {
-            bestVoice = targetVoices.find(v => v.localService) || targetVoices[0];
-        }
-        
-        utterance.lang = targetLangCode;
-        if (bestVoice) utterance.voice = bestVoice;
-        utterance.rate = playbackSpeed;
-
-        utterance.onstart = () => {
-            setIsPlaying(true);
-            setDialogueState('playing');
-            setStatusText(`${segment.type} ${Math.floor(index / 2) + 1} wird vorgelesen...`);
-        };
-        utterance.onend = () => {
-          setIsPlaying(false);
-          setDialogueState('waiting_for_record');
-          setStatusText(`Drücken Sie 🎤, um Ihre Verdolmetschung aufzunehmen.`);
-        };
-        
-        utterance.onerror = (e: SpeechSynthesisErrorEvent) => {
-          console.error(`Speech synthesis error: ${e.error}. For language ${utterance.lang}.`, e);
-          let userMessage = 'Fehler bei der Sprachausgabe.';
-          if (e.error === 'language-unavailable') userMessage = `Keine Stimme für die Sprache '${segment.lang}' in Ihrem Browser verfügbar.`;
-          setPlaybackError(userMessage);
-          setIsPlaying(false);
-          setDialogueState('idle');
-        };
-
-        speechSynthesis.speak(utterance);
-    }, [dialogueSegments, playbackSpeed]);
-
-
-    // --- DIALOGUE MODE LOGIC ---
-    const playSegment = useCallback(async (index: number) => {
-        if (index < 0 || index >= dialogueSegments.length) return;
-        
-        const segment = dialogueSegments[index];
-        
-        const playPremiumAudio = (src: string) => {
-            if (audioRef.current) {
-                audioRef.current.src = src;
-                audioRef.current.playbackRate = playbackSpeed;
-    
-                audioRef.current.onended = () => {
-                  setIsPlaying(false);
-                  setDialogueState('waiting_for_record');
-                  setStatusText(`Drücken Sie 🎤, um Ihre Verdolmetschung aufzunehmen.`);
-                  if(audioRef.current) audioRef.current.onended = null;
-                };
-    
-                audioRef.current.play().then(() => {
-                    setIsPlaying(true);
-                    setDialogueState('playing');
-                    setStatusText(`${segment.type} ${Math.floor(index / 2) + 1} wird vorgelesen...`);
-                }).catch(playError => {
-                    console.error("Audio playback failed in dialogue mode:", playError);
-                    setPlaybackError("Fehler beim Abspielen des Segments. Ihr Browser hat die Wiedergabe möglicherweise blockiert.");
-                    setIsPlaying(false);
-                    setDialogueState('idle');
-                    if (audioRef.current) audioRef.current.onended = null;
-                });
+      const speakChunk = () => {
+        if (currentChunk < chunks.length && window.speechSynthesis) {
+          const utterance = new SpeechSynthesisUtterance(chunks[currentChunk]);
+          utterance.lang = LANGUAGE_CODES[lang];
+          utterance.onend = () => {
+            currentChunk++;
+            if (currentChunk < chunks.length) {
+              speakChunk();
+            } else {
+              setIsPlaying(false);
+              if (onEndedCallback) onEndedCallback();
             }
-        };
-
-        if (effectiveVoiceQuality === 'Premium') {
-            if (premiumDialogueAudio[index]) {
-                playPremiumAudio(premiumDialogueAudio[index]);
-                return;
-            }
-            try {
-                setDialogueState('synthesizing');
-                setStatusText(`Generiere Premium-Stimme für ${segment.type} ${Math.floor(index / 2) + 1}...`);
-                const audioContent = await synthesizeSpeechGoogleCloud(segment.text, segment.lang, process.env.API_KEY!);
-                const audioSrc = `data:audio/mp3;base64,${audioContent}`;
-                setPremiumDialogueAudio(prev => ({ ...prev, [index]: audioSrc }));
-                playPremiumAudio(audioSrc);
-            } catch(err) {
-                 console.error("Error playing premium segment:", err);
-                 setDialogueState('idle');
-                 if (err instanceof TtsAuthError) {
-                    if (isPremiumVoiceAvailable) {
-                        onPremiumVoiceAuthError();
-                        setPlaybackError("Premium-Stimme ist mit dem API-Schlüssel nicht verfügbar. Die App wechselt zur Standard-Stimme.");
-                    }
-                    setEffectiveVoiceQuality('Standard');
-                    playSegmentWithBrowserVoice(index);
-                 } else {
-                    setPlaybackError((err as Error).message);
-                    setIsPlaying(false);
-                 }
-            }
+          };
+          window.speechSynthesis.speak(utterance);
         } else {
-            playSegmentWithBrowserVoice(index);
+            setIsPlaying(false);
+            if (onEndedCallback) onEndedCallback();
         }
+      };
+      
+      const utterance = new SpeechSynthesisUtterance(chunks[0]);
+      utterance.lang = LANGUAGE_CODES[lang];
+      utterance.onend = () => {
+        currentChunk++;
+        if (currentChunk < chunks.length) {
+            speakChunk();
+        } else {
+            setIsPlaying(false);
+            if(onEndedCallback) onEndedCallback();
+        }
+      };
+      window.speechSynthesis.speak(utterance);
+    }
+  }, [settings.voiceQuality, stopPlayback, onPremiumVoiceAuthError]);
+  
+  const startRecording = useCallback((onRecognitionEnd: (transcript: string) => void) => {
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionAPI) {
+        alert("Ihr Browser unterstützt die Web Speech API nicht. Bitte versuchen Sie es mit Chrome.");
+        return;
+    }
+    recognitionRef.current = new SpeechRecognitionAPI();
+    const recognition = recognitionRef.current;
+    recognition.lang = LANGUAGE_CODES[settings.targetLang];
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    
+    let finalTranscript = '';
+    recognition.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        }
+      }
+    };
 
-    }, [dialogueSegments, playbackSpeed, effectiveVoiceQuality, playSegmentWithBrowserVoice, isPremiumVoiceAvailable, onPremiumVoiceAuthError, premiumDialogueAudio]);
+    recognition.onstart = () => {
+        setIsRecording(true);
+        if (settings.mode === 'Gesprächsdolmetschen') setDialogueState('recording');
+    }
+    recognition.onend = () => {
+      setIsRecording(false);
+      onRecognitionEnd(finalTranscript.trim());
+      recognitionRef.current = null;
+    };
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error', event);
+      setIsRecording(false);
+       if (settings.mode === 'Gesprächsdolmetschen') setDialogueState('waiting_for_record');
+    };
 
-    const advanceToNextSegment = useCallback((latestTranscriptSegment?: string) => {
-      if (latestTranscriptSegment !== undefined) {
-          dialogueTranscriptsRef.current.push(latestTranscriptSegment);
+    recognition.start();
+  }, [settings.targetLang, settings.mode]);
+
+  const stopRecording = useCallback(() => {
+      recognitionRef.current?.stop();
+  }, []);
+
+  // --- Effect and Logic for Dialogue Interpreting ---
+  useEffect(() => {
+    if (settings.mode === 'Gesprächsdolmetschen' && originalText) {
+        const lines = originalText.split('\n').filter(line => line.trim() !== '');
+        const segments: DialogueSegment[] = lines.map(line => {
+            const isQuestion = line.startsWith('Frage');
+            return {
+                type: isQuestion ? 'Frage' : 'Antwort',
+                text: line.replace(/^(Frage|Antwort)\s*\d*:\s*/, ''),
+                lang: isQuestion ? settings.sourceLang : settings.targetLang
+            };
+        });
+        setDialogueSegments(segments);
+        setCurrentSegmentIndex(0);
+        dialogueTranscriptsRef.current = [];
+        setDialogueState('starting'); 
+    }
+  }, [originalText, settings.mode, settings.sourceLang, settings.targetLang]);
+  
+  const advanceToNextSegment = useCallback((lastTranscript?: string) => {
+      if (lastTranscript) {
+          dialogueTranscriptsRef.current.push(lastTranscript);
       }
       const nextIndex = currentSegmentIndex + 1;
       
       if (nextIndex >= dialogueSegments.length) {
           setDialogueState('finished');
-          const fullTranscript = dialogueTranscriptsRef.current.filter(t => t.trim()).join(' ');
-          onRecordingFinished(fullTranscript);
-          setStatusText('Übung abgeschlossen. Ihr vollständiges Transkript wird verarbeitet.');
-      } else {
-          setCurrentSegmentIndex(nextIndex);
-          setIsCurrentSegmentVisible(false);
-          playSegment(nextIndex);
+          onRecordingFinished(dialogueTranscriptsRef.current.join(' '));
+          onDialogueFinished();
+          return;
       }
-    }, [currentSegmentIndex, dialogueSegments, playSegment, onRecordingFinished]);
+      
+      setCurrentSegmentIndex(nextIndex);
+      const nextSegment = dialogueSegments[nextIndex];
 
-    // --- GENERIC PLAYBACK & RECORDING ---
-    const handlePlayPause = async () => {
-        if (settings.mode === 'Gesprächsdolmetschen') {
-            if (dialogueState === 'idle') {
-                advanceToNextSegment();
-            }
-            return;
-        }
+      if (nextSegment.type === 'Frage') {
+          setDialogueState('synthesizing');
+          playText(nextSegment.text, nextSegment.lang, () => {
+              advanceToNextSegment();
+          });
+      } else { // Antwort
+          setDialogueState('waiting_for_record');
+      }
 
-        if (isPlaying) {
-            speechSynthesis.cancel();
-            if (audioRef.current) audioRef.current.pause();
-            setIsPlaying(false);
-        } else { // Not playing, so start playing
-            setPlaybackError(null);
-            
-            if (effectiveVoiceQuality === 'Premium') {
-                // If we have already synthesized the audio, just play it.
-                if (premiumAudioSrc && audioRef.current) {
-                    // Re-assigning the src is a robust way to ensure the audio element is ready to play again.
-                    audioRef.current.src = premiumAudioSrc;
-                    audioRef.current.currentTime = 0;
-                    audioRef.current.play().then(() => {
-                        setIsPlaying(true);
-                    }).catch(playError => {
-                        console.error("Audio playback failed:", playError);
-                        setPlaybackError("Fehler beim Abspielen der Audiodatei. Ihr Browser hat die Wiedergabe möglicherweise blockiert.");
-                        setIsPlaying(false);
-                    });
-                    return;
-                }
+  }, [currentSegmentIndex, dialogueSegments, onDialogueFinished, onRecordingFinished, playText]);
 
-                // Otherwise, synthesize for the first time
-                try {
-                    setIsSynthesizing(true);
-                    const audioContent = await synthesizeSpeechGoogleCloud(originalText, settings.sourceLang, process.env.API_KEY!);
-                    setIsSynthesizing(false);
-                    const audioSrc = `data:audio/mp3;base64,${audioContent}`;
-                    setPremiumAudioSrc(audioSrc); // Cache the audio source
 
-                    if (audioRef.current) {
-                        audioRef.current.src = audioSrc;
-                        audioRef.current.playbackRate = playbackSpeed;
-                        audioRef.current.play().then(() => {
-                            setIsPlaying(true);
-                        }).catch(playError => {
-                            console.error("Audio playback failed:", playError);
-                            setPlaybackError("Fehler beim Abspielen der Audiodatei. Ihr Browser hat die Wiedergabe möglicherweise blockiert.");
-                            setIsPlaying(false);
-                        });
-                    }
-                } catch (err) {
-                    console.error("Premium playback error:", err);
-                    if (err instanceof TtsAuthError) {
-                        if (isPremiumVoiceAvailable) {
-                            onPremiumVoiceAuthError();
-                            setPlaybackError("Premium-Stimme ist mit dem API-Schlüssel nicht verfügbar. Die App wechselt zur Standard-Stimme.");
-                        }
-                        setEffectiveVoiceQuality('Standard');
-                        playWithBrowserVoice();
-                    } else {
-                        setPlaybackError((err as Error).message || "Fehler bei der Generierung der Premium-Stimme.");
-                    }
-                    setIsSynthesizing(false);
-                }
-            } else {
-                 playWithBrowserVoice();
-            }
-        }
-    };
-    
-    const handleRecord = () => {
-        if (isRecording) {
-            if (recognitionRef.current) {
-                (recognitionRef.current as any)._intentionalStop = true;
-                recognitionRef.current.stop();
-            }
+  useEffect(() => {
+    if (dialogueState === 'starting' && dialogueSegments.length > 0) {
+        const firstSegment = dialogueSegments[0];
+        if (firstSegment.type === 'Frage') {
+            setDialogueState('synthesizing');
+            playText(firstSegment.text, firstSegment.lang, () => {
+                 advanceToNextSegment(); // Move to the first answer
+            });
         } else {
-            setRecognitionError(null);
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) {
-                setRecognitionError("Speech Recognition wird von Ihrem Browser nicht unterstützt.");
-                return;
-            }
-            
-            const recognition = new SpeechRecognition();
-            (recognition as any)._intentionalStop = false; // Custom flag to manage restarts
-
-            const isDialogue = settings.mode === 'Gesprächsdolmetschen';
-            const currentSegment = dialogueSegments[currentSegmentIndex];
-            const targetLang = isDialogue 
-              ? (currentSegment.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang)
-              : settings.targetLang;
-            
-            recognition.lang = LANGUAGE_CODES[targetLang];
-            recognition.continuous = true;
-            recognition.interimResults = false;
-            
-            let finalTranscript = '';
-            recognition.onresult = (event) => {
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript + ' ';
-                    }
-                }
-            };
-
-            recognition.onstart = () => {
-                setIsRecording(true);
-                if(isDialogue) {
-                    setDialogueState('recording');
-                    setStatusText('Aufnahme läuft... Drücken Sie ⏹️ zum Beenden.');
-                }
-            };
-
-            recognition.onend = async () => {
-                const wasIntentional = (recognition as any)._intentionalStop;
-                if (wasIntentional) {
-                    // User-initiated stop or an error occurred. Finalize.
-                    setIsRecording(false);
-                    if (isDialogue) {
-                        const currentTranscript = finalTranscript.trim();
-                        advanceToNextSegment(currentTranscript);
-                    } else {
-                        await onRecordingFinished(finalTranscript);
-                    }
-                } else {
-                    // Timeout due to silence. Restart automatically.
-                    try {
-                        recognition.start();
-                    } catch (e) {
-                        console.error("Failed to automatically restart speech recognition:", e);
-                        setIsRecording(false); // Stop if restart fails
-                    }
-                }
-            };
-
-            recognition.onerror = (event) => {
-                (recognition as any)._intentionalStop = true; // Prevent restart on error
-                console.error("Speech recognition error:", event.error, event.message);
-                let errorMessage;
-                switch (event.error) {
-                    case 'no-speech': errorMessage = "Es wurde keine Sprache erkannt. Die Aufnahme wurde beendet."; break;
-                    case 'audio-capture': errorMessage = "Problem mit dem Mikrofon."; break;
-                    case 'not-allowed': errorMessage = "Zugriff auf das Mikrofon verweigert."; break;
-                    case 'network': errorMessage = "Netzwerkfehler bei der Spracherkennung."; break;
-                    case 'language-not-supported': errorMessage = `Die Sprache wird nicht unterstützt.`; break;
-                    default: errorMessage = `Ein unbekannter Fehler ist aufgetreten (${event.error}).`;
-                }
-                setRecognitionError(errorMessage);
-                setIsRecording(false);
-                if(isDialogue) setDialogueState('waiting_for_record');
-            };
-            
-            recognition.start();
-            recognitionRef.current = recognition;
+             setDialogueState('waiting_for_record');
         }
+    }
+  }, [dialogueState, dialogueSegments, playText, advanceToNextSegment]);
+
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopPlayback();
+      stopRecording();
     };
-    
-    useEffect(() => {
-        if (isPlaying || isRecording) {
-            timerRef.current = window.setInterval(() => {
-                if (isPlaying) setPlaybackTime(t => t + 1);
-                if (isRecording) setRecordingTime(t => t + 1);
-            }, 1000);
-        } else {
-            if(timerRef.current) clearInterval(timerRef.current);
-        }
-        return () => { if(timerRef.current) clearInterval(timerRef.current); }
-    }, [isPlaying, isRecording]);
+  }, [stopPlayback, stopRecording]);
 
-    const isSimultaneousMode = settings.mode === 'Simultandolmetschen' || settings.mode === 'Shadowing';
-    
-    // --- RENDER ---
-    if (isLoading || isSynthesizing) {
-        return (
-            <section className="panel practice-area">
-                <div className="loader-overlay">
-                    <div className="spinner"></div>
-                    <p>{isSynthesizing ? 'Generiere Premium-Stimme...' : loadingMessage}</p>
-                </div>
-            </section>
-        );
-    }
-
-    if (!exerciseStarted) {
-        return (
-            <section className="panel practice-area">
-                <div style={{textAlign: 'center', margin: 'auto'}}>
-                    <p>Konfigurieren Sie Ihre Übungssitzung und klicken Sie auf "Loslegen".</p>
-                </div>
-            </section>
-        );
-    }
-    
-
-    if (settings.mode === 'Gesprächsdolmetschen') {
-        const currentSegment = dialogueSegments[currentSegmentIndex];
-        const isFinished = dialogueState === 'finished' || currentSegmentIndex >= dialogueSegments.length;
-        
-        return (
-          <section className="panel practice-area">
-            {!isFinished ? (
-              <>
-                <div className="dialogue-practice-container">
-                    <div className="practice-header">
-                        <h2>{settings.mode} Übung</h2>
-                        {currentSegment && <span>{currentSegment.type} {Math.floor(currentSegmentIndex / 2) + 1} / {dialogueSegments.length / 2}</span>}
-                    </div>
-                    <div className="dialogue-status">{statusText}</div>
-
-                    <div className="current-segment-display">
-                        {dialogueState === 'idle' || !currentSegment ? (
-                           <div className="segment-text-hidden">Das Interview beginnt in Kürze...</div>
-                        ) : isCurrentSegmentVisible ? (
-                            <p className="segment-text">{currentSegment.text}</p>
-                        ) : (
-                            <div className="segment-text-hidden">Der Text ist verborgen, um das Hörverstehen zu trainieren.</div>
-                        )}
-                    </div>
-                    
-                    <div className="segment-controls">
-                        <button 
-                            className="btn btn-secondary" 
-                            onClick={() => setIsCurrentSegmentVisible(true)} 
-                            disabled={!currentSegment || isCurrentSegmentVisible || dialogueState === 'idle'}
-                        >
-                            Text anzeigen
-                        </button>
-                    </div>
-                </div>
-                
-                <div className="controls">
-                    <button className="control-btn" onClick={handlePlayPause} disabled={dialogueState !== 'idle' || !voicesLoaded} title={voicesLoaded ? "Interview starten" : "Stimmen werden geladen..."}>
-                        ▶️
-                    </button>
-                    <button className={`control-btn ${isRecording ? 'recording' : ''}`} onClick={handleRecord} disabled={dialogueState !== 'waiting_for_record' && !isRecording} title={isRecording ? 'Stop' : 'Aufnahme'}>
-                        {isRecording ? '⏹️' : '🎤'}
-                    </button>
-                     <div className="timers">
-                        <span>Aufnahme: {formatTime(recordingTime)}</span>
-                    </div>
-                </div>
-              </>
-            ) : (
-                <DialogueResults 
-                    userTranscript={userTranscript}
-                    feedback={feedback}
-                    getFeedback={getFeedback}
-                    isLoading={isLoading}
-                    error={error}
-                />
-            )}
-            {error && <div className="error-message">{error}</div>}
-            {playbackError && <div className="error-message">{playbackError}</div>}
-            {recognitionError && <div className="error-message">{recognitionError}</div>}
-            <audio ref={audioRef} onEnded={() => setIsPlaying(false)} />
-          </section>
-        );
-    }
-    
-    // Special layout for Sight Translation (Stegreifübersetzen)
-    if (settings.mode === 'Stegreifübersetzen') {
-        return (
-            <section className="panel practice-area">
-                <div className="practice-header">
-                    <h2>{settings.mode} Übung</h2>
-                    <div>
-                        {isEditing ? (
-                            <button className="btn btn-primary" onClick={handleSave} style={{width:'auto', padding:'0.4rem 0.8rem'}}>Speichern</button>
-                        ) : (
-                            <button className="btn btn-secondary" onClick={handleEdit} style={{width:'auto', padding:'0.4rem 0.8rem'}}>Bearbeiten</button>
-                        )}
-                        <span className="char-count" style={{marginLeft: '1rem'}}>Zeichen: {isEditing ? editedText.length : originalText.length}</span>
-                    </div>
-                </div>
-                <div className="original-text-container">
-                  <textarea className="original-text" readOnly={!isEditing} value={isEditing ? editedText : originalText} onChange={(e) => setEditedText(e.target.value)} />
-                </div>
-                <div className="controls">
-                    <button className={`control-btn ${isRecording ? 'recording' : ''}`} onClick={handleRecord} disabled={isEditing} title={isRecording ? 'Stop' : 'Aufnahme'}>
-                        {isRecording ? '⏹️' : '🎤'}
-                    </button>
-                    <div className="timers">
-                        <span>Aufnahme: {formatTime(recordingTime)}</span>
-                    </div>
-                </div>
-                {error && <div className="error-message">{error}</div>}
-                {recognitionError && <div className="error-message">{recognitionError}</div>}
-                 {userTranscript && (
-                    <div className="tab-pane-content" style={{borderTop: '1px solid var(--border-color)', marginTop: '1rem'}}>
-                         {feedback ? (
-                           <div className="feedback-card" style={{marginTop: '1.5rem'}}>
-                                <h3>KI-Feedback</h3>
-                                <p>{feedback.summary}</p>
-                           </div>
-                        ) : (
-                             <div className="feedback-section" style={{paddingTop: '1rem'}}>
-                                <div className="feedback-card">
-                                  <h3>Ihre Verdolmetschung (Transkript)</h3>
-                                  <textarea className="transcript-textarea" readOnly value={userTranscript} />
-                                </div>
-                                <div className="feedback-actions">
-                                  <button className="btn btn-primary" onClick={getFeedback} disabled={isLoading}>Feedback anfordern</button>
-                                </div>
-                              </div>
-                        )}
-                    </div>
-                 )}
-            </section>
-        );
-    }
-    
-    // Tabbed layout for all other modes
+  if (isLoading) {
     return (
-        <section className="panel practice-area">
-            <div className="practice-header">
-                <h2>{settings.mode} Übung</h2>
-                {activeTab === 'original' && (
-                    <div>
-                        {isEditing ? (
-                            <button className="btn btn-primary" onClick={handleSave} style={{width:'auto', padding:'0.4rem 0.8rem'}}>Speichern</button>
-                        ) : (
-                            <button className="btn btn-secondary" onClick={handleEdit} style={{width:'auto', padding:'0.4rem 0.8rem'}}>Bearbeiten</button>
-                        )}
-                        <span className="char-count" style={{marginLeft: '1rem'}}>Zeichen: {isEditing ? editedText.length : originalText.length}</span>
-                    </div>
-                )}
-            </div>
-
-            <nav className="tab-nav">
-                <button className={`tab-btn ${activeTab === 'original' ? 'active' : ''}`} onClick={() => setActiveTab('original')}>
-                    Originaltext
-                </button>
-                <button className={`tab-btn ${activeTab === 'transcript' ? 'active' : ''}`} onClick={() => setActiveTab('transcript')} disabled={!userTranscript}>
-                    Transkript
-                </button>
-                <button className={`tab-btn ${activeTab === 'feedback' ? 'active' : ''}`} onClick={() => setActiveTab('feedback')} disabled={!feedback}>
-                    KI-Feedback
-                </button>
-                <button className={`tab-btn ${activeTab === 'analysis' ? 'active' : ''}`} onClick={() => setActiveTab('analysis')} disabled={!feedback}>
-                    Fehleranalyse
-                </button>
-            </nav>
-
-            <div className="tab-content">
-                {activeTab === 'original' && (
-                    <div className="original-text-container">
-                        <textarea className="original-text" readOnly={!isEditing} value={isEditing ? editedText : originalText} onChange={(e) => setEditedText(e.target.value)} />
-                    </div>
-                )}
-                {activeTab === 'transcript' && userTranscript && (
-                    <div className="tab-pane-content">
-                        <div className="feedback-card" style={{flexGrow: 1, display: 'flex', flexDirection: 'column'}}>
-                          <div className="transcript-header">
-                            <h3>Ihre Verdolmetschung (Transkript)</h3>
-                            {isEditingTranscript ? (
-                              <button className="btn btn-primary" onClick={handleSaveTranscript}>Korrekturen übernehmen</button>
-                            ) : (
-                              <button className="btn btn-secondary" onClick={handleEditTranscript}>Transkript korrigieren</button>
-                            )}
-                          </div>
-                          <textarea
-                            className="transcript-textarea"
-                            readOnly={!isEditingTranscript}
-                            value={isEditingTranscript ? editedTranscript : userTranscript}
-                            onChange={(e) => setEditedTranscript(e.target.value)}
-                            aria-label="Transkript Ihrer Verdolmetschung"
-                          />
-                        </div>
-                        <div className="feedback-actions">
-                          <button className="btn btn-primary" onClick={getFeedback} disabled={isLoading || isEditingTranscript}>Feedback anfordern</button>
-                        </div>
-                    </div>
-                )}
-                {activeTab === 'feedback' && feedback && (
-                     <div className="tab-pane-content">
-                        <div className="feedback-card" style={{marginBottom: '1.5rem'}}>
-                            <h3>KI-Feedback: Zusammenfassung</h3>
-                            <p>{feedback.summary}</p>
-                        </div>
-                        <div className="feedback-card ratings-panel">
-                             <h3>Bewertung</h3>
-                             <div className="ratings">
-                                <div className="rating-item">
-                                    <span>{feedback.ratings.content}/10</span>
-                                    <span>Inhalt</span>
-                                </div>
-                                <div className="rating-item">
-                                    <span>{feedback.ratings.expression}/10</span>
-                                    <span>Ausdruck</span>
-                                </div>
-                                <div className="rating-item">
-                                    <span>{feedback.ratings.terminology}/10</span>
-                                    <span>Terminologie</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-                {activeTab === 'analysis' && feedback && (
-                    <div className="tab-pane-content">
-                        <div className="feedback-card" style={{flexGrow: 1}}>
-                            <h3>Fehleranalyse</h3>
-                            {feedback.errorAnalysis?.length > 0 ? (
-                                <div className="error-analysis">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th>Original</th>
-                                            <th>Ihre Version</th>
-                                            <th>Vorschlag</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {feedback.errorAnalysis.map((err, i) => (
-                                            <tr key={i}>
-                                                <td>{err.original}</td>
-                                                <td>{err.interpretation}</td>
-                                                <td>{err.suggestion}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                                </div>
-                            ) : <p style={{paddingTop: '1rem'}}>Keine signifikanten Fehler gefunden.</p>}
-                        </div>
-                    </div>
-                )}
-            </div>
-            
-            {activeTab === 'original' && (
-                <div className="controls">
-                    <button className="control-btn" onClick={handlePlayPause} disabled={isEditing || (isRecording && !isSimultaneousMode) || (!voicesLoaded && settings.voiceQuality === 'Standard')} title={voicesLoaded || settings.voiceQuality === 'Premium' ? (isPlaying ? 'Stop' : 'Play') : 'Stimmen werden geladen...'}>
-                        {isPlaying ? '⏹️' : '▶️'}
-                    </button>
-                    <button className={`control-btn ${isRecording ? 'recording' : ''}`} onClick={handleRecord} disabled={isEditing || (isPlaying && !isSimultaneousMode)} title={isRecording ? 'Stop' : 'Aufnahme'}>
-                        {isRecording ? '⏹️' : '🎤'}
-                    </button>
-                    <div className="tempo-control">
-                        <label htmlFor="tempo">Tempo:</label>
-                        <input type="range" id="tempo" min="0.5" max="2" step="0.1" value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} />
-                        <span>{playbackSpeed.toFixed(1)}x</span>
-                    </div>
-                    <div className="timers">
-                        <span>Lesezeit: {formatTime(playbackTime)}</span>
-                        <span>Aufnahme: {formatTime(recordingTime)}</span>
-                    </div>
-                </div>
-            )}
-            
-            <audio ref={audioRef} onEnded={() => setIsPlaying(false)} />
-            {error && <div className="error-message">{error}</div>}
-            {playbackError && <div className="error-message">{playbackError}</div>}
-            {recognitionError && <div className="error-message">{recognitionError}</div>}
-        </section>
+      <section className="panel practice-area">
+        <div className="loading-overlay">
+          <div className="spinner"></div>
+          <p>{loadingMessage}</p>
+        </div>
+      </section>
     );
+  }
+
+  if (!exerciseStarted) {
+    return (
+      <section className="panel practice-area">
+        <div className="placeholder">
+          <h2>Willkommen beim Dolmetsch-Trainer Pro</h2>
+          <p>Passen Sie die Einstellungen auf der linken Seite an und klicken Sie auf "Loslegen", um eine neue Übung zu starten.</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (settings.mode === 'Gesprächsdolmetschen') {
+        const segment = dialogueSegments[currentSegmentIndex];
+        const stateMessages: Record<DialogueState, string> = {
+            idle: "Übung wird vorbereitet...",
+            starting: "Übung wird gestartet...",
+            synthesizing: `Spielt ${segment?.type || ''}...`,
+            playing: `Spielt ${segment?.type || ''}...`,
+            waiting_for_record: `Sie sind dran. Bitte übersetzen Sie die Antwort.`,
+            recording: 'Aufnahme läuft...',
+            finished: 'Übung abgeschlossen. Transkript wird verarbeitet.'
+        };
+        const canRecord = dialogueState === 'waiting_for_record';
+        const isRecording = dialogueState === 'recording';
+
+        return (
+             <section className="panel practice-area">
+                <div className="dialogue-practice-container">
+                    <div className="dialogue-status">{stateMessages[dialogueState]}</div>
+                    <div className="current-segment-display">
+                        {dialogueState === 'finished' || !segment ? (
+                             <p className="segment-text-hidden">Übung abgeschlossen</p>
+                        ) : segment.type === 'Frage' || (segment.type === 'Antwort' && dialogueState !== 'waiting_for_record' && dialogueState !== 'recording') ? (
+                            <p className="segment-text-hidden">Die Antwort wird verborgen, während Sie dolmetschen.</p>
+                        ) : (
+                            <p className="segment-text">{segment.text}</p>
+                        )}
+                    </div>
+                    <footer className="practice-footer">
+                        <button 
+                            className={`btn-record ${isRecording ? 'recording' : ''}`} 
+                            onClick={() => {
+                                if (isRecording) stopRecording();
+                                else if (canRecord) startRecording((transcript) => advanceToNextSegment(transcript));
+                            }}
+                            disabled={!canRecord && !isRecording}
+                        >
+                            <span className="mic-icon"></span>
+                            {isRecording ? 'Aufnahme stoppen' : 'Aufnahme starten'}
+                        </button>
+                    </footer>
+                </div>
+             </section>
+        );
+  }
+  
+  // Default view for other modes
+  return (
+    <section className="panel practice-area">
+      {error && <div className="error-banner">{error}</div>}
+      <div className="tabs">
+        <button className={`tab-btn ${activeTab === 'original' ? 'active' : ''}`} onClick={() => setActiveTab('original')}>Originaltext</button>
+        <button className={`tab-btn ${activeTab === 'transcript' ? 'active' : ''}`} onClick={() => setActiveTab('transcript')}>Ihr Transkript</button>
+        <button className={`tab-btn ${activeTab === 'feedback' ? 'active' : ''}`} onClick={() => setActiveTab('feedback')}>Feedback</button>
+      </div>
+
+      <div className="tab-content">
+        {activeTab === 'original' && (
+          <>
+            <div className="controls-bar">
+              <button onClick={() => playText(originalText, settings.sourceLang)} disabled={isPlaying || isRecording}>
+                {isPlaying ? 'Spielt...' : '▶ Abspielen'}
+              </button>
+              <button onClick={stopPlayback} disabled={!isPlaying}>■ Stopp</button>
+            </div>
+            <div className="text-area">
+              <p>{originalText}</p>
+            </div>
+          </>
+        )}
+        {activeTab === 'transcript' && (
+          <>
+            <div className="controls-bar">
+              <button onClick={getFeedback} disabled={!userTranscript.trim() || isRecording}>Feedback erhalten</button>
+            </div>
+             <div className="text-area">
+              <p>{userTranscript || "Noch kein Transkript vorhanden. Machen Sie eine Aufnahme."}</p>
+            </div>
+          </>
+        )}
+        {activeTab === 'feedback' && (
+           <div className="text-area">
+               <FeedbackDisplay feedback={feedback} getFeedback={getFeedback} userTranscript={userTranscript} />
+           </div>
+        )}
+      </div>
+
+      <footer className="practice-footer">
+        <button 
+          className={`btn-record ${isRecording ? 'recording' : ''}`} 
+          onClick={() => {
+              if (isRecording) stopRecording();
+              else startRecording(onRecordingFinished);
+          }}
+          disabled={isPlaying}
+        >
+          <span className="mic-icon"></span>
+          {isRecording ? 'Aufnahme stoppen' : 'Aufnahme starten'}
+        </button>
+         <p className="form-text-hint">Ihre Aufnahme wird lokal verarbeitet und nur zur Feedback-Generierung an die KI gesendet.</p>
+      </footer>
+    </section>
+  );
 };
 
 const container = document.getElementById('root');
-const root = createRoot(container!);
-root.render(<App />);
+if (container) {
+    const root = createRoot(container);
+    root.render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>
+    );
+}

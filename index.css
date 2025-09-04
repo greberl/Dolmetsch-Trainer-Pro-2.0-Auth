@@ -516,6 +516,12 @@ textarea.form-control {
     padding: 0.5rem 1rem;
 }
 
+.dialogue-results-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
 /* Tab Navigation Styles */
 .tab-nav {
     display: flex;
