@@ -1211,7 +1211,6 @@ const PracticeArea = ({
               </>
             ) : (
                 <div className="tab-content">
-                    {/* Final transcript and feedback for dialogue mode */}
                     <div className="tab-pane-content">
                         {feedback ? (
                             <>
@@ -1238,15 +1237,22 @@ const PracticeArea = ({
                                 </div>
                             </>
                         ) : (
-                             <div className="feedback-section">
-                                <div className="feedback-card">
-                                  <h3>Ihre Verdolmetschung (Gesamtes Transkript)</h3>
-                                  <textarea className="transcript-textarea" readOnly value={userTranscript} />
+                             <>
+                                <div className="feedback-card" style={{flexGrow: 1, display: 'flex', flexDirection: 'column'}}>
+                                  <div className="transcript-header">
+                                    <h3>Ihre Verdolmetschung (Gesamtes Transkript)</h3>
+                                  </div>
+                                  <textarea
+                                    className="transcript-textarea"
+                                    readOnly
+                                    value={userTranscript}
+                                    aria-label="Gesamtes Transkript Ihrer Verdolmetschung"
+                                  />
                                 </div>
                                 <div className="feedback-actions">
                                   <button className="btn btn-primary" onClick={getFeedback} disabled={isLoading}>Feedback anfordern</button>
                                 </div>
-                              </div>
+                            </>
                         )}
                     </div>
                 </div>
