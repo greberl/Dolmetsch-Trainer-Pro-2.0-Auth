@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -740,7 +741,10 @@ const PracticeArea = ({
                 audioRef.current.pause();
                 audioRef.current.src = "";
             }
-            recognitionRef.current?.stop();
+            if (recognitionRef.current) {
+                (recognitionRef.current as any)._intentionalStop = true;
+                recognitionRef.current.stop();
+            }
             if (timerRef.current) clearInterval(timerRef.current);
         };
     }, []);
@@ -1028,7 +1032,10 @@ const PracticeArea = ({
     
     const handleRecord = () => {
         if (isRecording) {
-            recognitionRef.current?.stop();
+            if (recognitionRef.current) {
+                (recognitionRef.current as any)._intentionalStop = true;
+                recognitionRef.current.stop();
+            }
         } else {
             setRecognitionError(null);
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1038,6 +1045,8 @@ const PracticeArea = ({
             }
             
             const recognition = new SpeechRecognition();
+            (recognition as any)._intentionalStop = false; // Custom flag to manage restarts
+
             const isDialogue = settings.mode === 'Gesprächsdolmetschen';
             const currentSegment = dialogueSegments[currentSegmentIndex];
             const targetLang = isDialogue 
@@ -1066,21 +1075,34 @@ const PracticeArea = ({
             };
 
             recognition.onend = () => {
-                setIsRecording(false);
-                if (isDialogue) {
-                    setDialogueTranscripts(prev => [...prev, finalTranscript.trim()]);
-                    advanceToNextSegment();
+                const wasIntentional = (recognition as any)._intentionalStop;
+                if (wasIntentional) {
+                    // User-initiated stop or an error occurred. Finalize.
+                    setIsRecording(false);
+                    if (isDialogue) {
+                        setDialogueTranscripts(prev => [...prev, finalTranscript.trim()]);
+                        advanceToNextSegment();
+                    } else {
+                        onRecordingFinished(finalTranscript);
+                        setActiveTab('transcript');
+                    }
                 } else {
-                    onRecordingFinished(finalTranscript);
-                    setActiveTab('transcript');
+                    // Timeout due to silence. Restart automatically.
+                    try {
+                        recognition.start();
+                    } catch (e) {
+                        console.error("Failed to automatically restart speech recognition:", e);
+                        setIsRecording(false); // Stop if restart fails
+                    }
                 }
             };
 
             recognition.onerror = (event) => {
+                (recognition as any)._intentionalStop = true; // Prevent restart on error
                 console.error("Speech recognition error:", event.error, event.message);
                 let errorMessage;
                 switch (event.error) {
-                    case 'no-speech': errorMessage = "Es wurde keine Sprache erkannt."; break;
+                    case 'no-speech': errorMessage = "Es wurde keine Sprache erkannt. Die Aufnahme wurde beendet."; break;
                     case 'audio-capture': errorMessage = "Problem mit dem Mikrofon."; break;
                     case 'not-allowed': errorMessage = "Zugriff auf das Mikrofon verweigert."; break;
                     case 'network': errorMessage = "Netzwerkfehler bei der Spracherkennung."; break;
