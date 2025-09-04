@@ -479,7 +479,6 @@ Gib dein Feedback als JSON-Objekt.
                   settings={settings}
                   exerciseStarted={exerciseStarted}
                   onPremiumVoiceAuthError={handlePremiumVoiceAuthError}
-                  isPremiumVoiceAvailable={isPremiumVoiceAvailable}
                   onDialogueFinished={() => setDialogueFinished(true)}
               />
             )}
@@ -806,13 +805,13 @@ const DialogueResults = ({ originalText, userTranscript, feedback, getFeedback, 
 const PracticeArea = ({
   isLoading, loadingMessage, originalText, onRecordingFinished, getFeedback,
   userTranscript, feedback, error, settings, exerciseStarted,
-  onPremiumVoiceAuthError, isPremiumVoiceAvailable, onDialogueFinished,
+  onPremiumVoiceAuthError, onDialogueFinished,
 }: {
   isLoading: boolean; loadingMessage: string; originalText: string;
   onRecordingFinished: (transcript: string) => void; getFeedback: () => void;
   userTranscript: string; feedback: Feedback | null; error: string | null; settings: Settings;
   exerciseStarted: boolean; onPremiumVoiceAuthError: () => void;
-  isPremiumVoiceAvailable: boolean; onDialogueFinished: () => void;
+  onDialogueFinished: () => void;
 }) => {
   const [activeTab, setActiveTab] = useState<PracticeAreaTab>('original');
   const [isPlaying, setIsPlaying] = useState(false);
