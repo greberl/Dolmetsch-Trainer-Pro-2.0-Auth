@@ -367,8 +367,6 @@ textarea.form-control {
 }
 
 .feedback-section {
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--border-color);
     overflow-y: auto;
     flex-grow: 1;
     display: flex;
@@ -383,7 +381,7 @@ textarea.form-control {
 .feedback-card {
     background-color: #f8f9fa;
     border-radius: var(--border-radius);
-    padding: 1rem;
+    padding: 1.5rem;
     border: 1px solid var(--border-color);
 }
 .feedback-card h3 {
@@ -559,54 +557,13 @@ textarea.form-control {
     overflow-y: auto; /* Allow content inside to scroll if needed */
 }
 
-
-/* --- NEW FEEDBACK VIEW STYLES --- */
-.feedback-view-container {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
+.tab-pane-content {
     height: 100%;
-    overflow: hidden; /* Prevent this container from scrolling, children will scroll */
-}
-
-.summary-ratings-bar {
-    display: flex;
-    gap: 1.5rem;
-    flex-shrink: 0; /* Prevent this bar from shrinking */
-}
-
-.summary-ratings-bar .summary-panel {
-    flex: 2; /* Give summary more space */
-}
-
-.summary-ratings-bar .ratings-panel {
-    flex: 1;
-}
-
-.feedback-details-grid {
-    display: grid;
-    grid-template-columns: 1fr 1.2fr; /* Give analysis a bit more space */
-    gap: 1.5rem;
-    flex-grow: 1; /* Take remaining space */
-    overflow: hidden; /* Important for child scrolling */
-}
-
-.transcript-panel, .analysis-panel {
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    overflow-y: auto; /* Allow individual scrolling */
 }
 
-.transcript-panel .transcript-content {
-    white-space: pre-wrap;
-    flex-grow: 1;
-    padding-top: 1rem;
-    line-height: 1.7;
-}
-
-.analysis-panel .error-analysis {
-    flex-grow: 1;
-}
 
 /* API Key Modal Styles */
 .api-key-modal-overlay {

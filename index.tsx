@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -56,7 +57,7 @@ type QALength = "1-3 Sätze" | "2-4 Sätze" | "3-5 Sätze" | "4-6 Sätze";
 type SpeechLength = "Kurz" | "Mittel" | "Prüfung";
 type VoiceQuality = "Standard" | "Premium";
 type DialogueState = 'idle' | 'synthesizing' | 'playing' | 'waiting_for_record' | 'recording' | 'finished';
-type PracticeAreaTab = 'original' | 'transcript';
+type PracticeAreaTab = 'original' | 'transcript' | 'feedback' | 'analysis';
 
 
 interface DialogueSegment {
@@ -334,7 +335,7 @@ const App = () => {
     }
   };
 
-  const getFeedback = async () => {
+  const getFeedback = async (setActiveTab: (tab: PracticeAreaTab) => void) => {
       if (!userTranscript) {
           setError("Kein Transkript vorhanden, um Feedback zu erhalten.");
           return;
@@ -411,6 +412,7 @@ Gib dein Feedback als JSON-Objekt.
         }
         const parsedFeedback = JSON.parse(jsonStr);
         setFeedback(parsedFeedback);
+        setActiveTab('feedback');
 
       } catch (err) {
           console.error(err);
@@ -440,7 +442,7 @@ Gib dein Feedback als JSON-Objekt.
             originalText={originalText}
             setOriginalText={setOriginalText}
             onRecordingFinished={handleRecordingFinished}
-            onGetFeedback={getFeedback}
+            getFeedback={getFeedback}
             userTranscript={userTranscript}
             setUserTranscript={setUserTranscript}
             feedback={feedback}
@@ -678,11 +680,11 @@ const parseDialogue = (text: string, sourceLang: Language, targetLang: Language)
 
 const PracticeArea = ({ 
     isLoading, loadingMessage, originalText, setOriginalText, onRecordingFinished, 
-    onGetFeedback, userTranscript, setUserTranscript, feedback, error, settings, 
+    getFeedback, userTranscript, setUserTranscript, feedback, error, settings, 
     exerciseStarted, onPremiumVoiceAuthError, isPremiumVoiceAvailable 
 }: {
     isLoading: boolean; loadingMessage: string; originalText: string; setOriginalText: (text: string) => void;
-    onRecordingFinished: (rawTranscript: string) => void; onGetFeedback: () => void; 
+    onRecordingFinished: (rawTranscript: string) => void; getFeedback: (setActiveTab: (tab: PracticeAreaTab) => void) => void; 
     userTranscript: string; setUserTranscript: (transcript: string) => void;
     feedback: Feedback | null; error: string | null; settings: Settings; exerciseStarted: boolean;
     onPremiumVoiceAuthError: () => void;
@@ -1155,88 +1157,100 @@ const PracticeArea = ({
         );
     }
     
-    const renderTranscriptAndFeedback = () => {
-      if (feedback) {
-        return <FeedbackDisplay feedback={feedback} userTranscript={userTranscript} />;
-      }
-    
-      if (userTranscript) {
-        return (
-          <div className="feedback-section">
-            <div className="feedback-card">
-              <div className="transcript-header">
-                <h3>Ihre Verdolmetschung (Transkript)</h3>
-                {isEditingTranscript ? (
-                  <button className="btn btn-primary" onClick={handleSaveTranscript}>Korrekturen übernehmen</button>
-                ) : (
-                  <button className="btn btn-secondary" onClick={handleEditTranscript}>Transkript korrigieren</button>
-                )}
-              </div>
-              <textarea
-                className="transcript-textarea"
-                readOnly={!isEditingTranscript}
-                value={isEditingTranscript ? editedTranscript : userTranscript}
-                onChange={(e) => setEditedTranscript(e.target.value)}
-                aria-label="Transkript Ihrer Verdolmetschung"
-              />
-            </div>
-            <div className="feedback-actions">
-              <button className="btn btn-primary" onClick={onGetFeedback} disabled={isLoading || isEditingTranscript}>Feedback anfordern</button>
-            </div>
-          </div>
-        );
-      }
-      return null;
-    };
 
     if (settings.mode === 'Gesprächsdolmetschen') {
         const currentSegment = dialogueSegments[currentSegmentIndex];
+        const isFinished = dialogueState === 'finished' || currentSegmentIndex >= dialogueSegments.length;
+        
         return (
           <section className="panel practice-area">
-            <div className="dialogue-practice-container">
-                <div className="practice-header">
-                    <h2>{settings.mode} Übung</h2>
-                    {currentSegment && <span>{currentSegment.type} {Math.floor(currentSegmentIndex / 2) + 1} / {dialogueSegments.length / 2}</span>}
-                </div>
-                <div className="dialogue-status">{statusText}</div>
+            {!isFinished ? (
+              <>
+                <div className="dialogue-practice-container">
+                    <div className="practice-header">
+                        <h2>{settings.mode} Übung</h2>
+                        {currentSegment && <span>{currentSegment.type} {Math.floor(currentSegmentIndex / 2) + 1} / {dialogueSegments.length / 2}</span>}
+                    </div>
+                    <div className="dialogue-status">{statusText}</div>
 
-                <div className="current-segment-display">
-                    {dialogueState === 'idle' || !currentSegment ? (
-                       <div className="segment-text-hidden">Das Interview beginnt in Kürze...</div>
-                    ) : isCurrentSegmentVisible ? (
-                        <p className="segment-text">{currentSegment.text}</p>
-                    ) : (
-                        <div className="segment-text-hidden">Der Text ist verborgen, um das Hörverstehen zu trainieren.</div>
-                    )}
+                    <div className="current-segment-display">
+                        {dialogueState === 'idle' || !currentSegment ? (
+                           <div className="segment-text-hidden">Das Interview beginnt in Kürze...</div>
+                        ) : isCurrentSegmentVisible ? (
+                            <p className="segment-text">{currentSegment.text}</p>
+                        ) : (
+                            <div className="segment-text-hidden">Der Text ist verborgen, um das Hörverstehen zu trainieren.</div>
+                        )}
+                    </div>
+                    
+                    <div className="segment-controls">
+                        <button 
+                            className="btn btn-secondary" 
+                            onClick={() => setIsCurrentSegmentVisible(true)} 
+                            disabled={!currentSegment || isCurrentSegmentVisible || dialogueState === 'idle'}
+                        >
+                            Text anzeigen
+                        </button>
+                    </div>
                 </div>
                 
-                <div className="segment-controls">
-                    <button 
-                        className="btn btn-secondary" 
-                        onClick={() => setIsCurrentSegmentVisible(true)} 
-                        disabled={!currentSegment || isCurrentSegmentVisible || dialogueState === 'idle'}
-                    >
-                        Text anzeigen
+                <div className="controls">
+                    <button className="control-btn" onClick={handlePlayPause} disabled={dialogueState !== 'idle' || !voicesLoaded} title={voicesLoaded ? "Interview starten" : "Stimmen werden geladen..."}>
+                        ▶️
                     </button>
+                    <button className={`control-btn ${isRecording ? 'recording' : ''}`} onClick={handleRecord} disabled={dialogueState !== 'waiting_for_record' && !isRecording} title={isRecording ? 'Stop' : 'Aufnahme'}>
+                        {isRecording ? '⏹️' : '🎤'}
+                    </button>
+                     <div className="timers">
+                        <span>Aufnahme: {formatTime(recordingTime)}</span>
+                    </div>
                 </div>
-            </div>
-            
-            <div className="controls">
-                <button className="control-btn" onClick={handlePlayPause} disabled={dialogueState !== 'idle' || !voicesLoaded} title={voicesLoaded ? "Interview starten" : "Stimmen werden geladen..."}>
-                    ▶️
-                </button>
-                <button className={`control-btn ${isRecording ? 'recording' : ''}`} onClick={handleRecord} disabled={dialogueState !== 'waiting_for_record' && !isRecording} title={isRecording ? 'Stop' : 'Aufnahme'}>
-                    {isRecording ? '⏹️' : '🎤'}
-                </button>
-                 <div className="timers">
-                    <span>Aufnahme: {formatTime(recordingTime)}</span>
+              </>
+            ) : (
+                <div className="tab-content">
+                    {/* Final transcript and feedback for dialogue mode */}
+                    <div className="tab-pane-content">
+                        {feedback ? (
+                            <>
+                                <div className="feedback-card" style={{ marginBottom: '1.5rem' }}>
+                                    <h3>KI-Feedback: Zusammenfassung</h3>
+                                    <p>{feedback.summary}</p>
+                                </div>
+                                <div className="feedback-card">
+                                    <h3>Fehleranalyse</h3>
+                                    {feedback.errorAnalysis?.length > 0 ? (
+                                        <div className="error-analysis">
+                                            <table>
+                                                <thead>
+                                                    <tr><th>Original</th><th>Ihre Version</th><th>Vorschlag</th></tr>
+                                                </thead>
+                                                <tbody>
+                                                    {feedback.errorAnalysis.map((err, i) => (
+                                                        <tr key={i}><td>{err.original}</td><td>{err.interpretation}</td><td>{err.suggestion}</td></tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    ) : <p style={{ paddingTop: '1rem' }}>Keine signifikanten Fehler gefunden.</p>}
+                                </div>
+                            </>
+                        ) : (
+                             <div className="feedback-section">
+                                <div className="feedback-card">
+                                  <h3>Ihre Verdolmetschung (Gesamtes Transkript)</h3>
+                                  <textarea className="transcript-textarea" readOnly value={userTranscript} />
+                                </div>
+                                <div className="feedback-actions">
+                                  <button className="btn btn-primary" onClick={() => getFeedback(setActiveTab)} disabled={isLoading}>Feedback anfordern</button>
+                                </div>
+                              </div>
+                        )}
+                    </div>
                 </div>
-            </div>
-
+            )}
             {error && <div className="error-message">{error}</div>}
             {playbackError && <div className="error-message">{playbackError}</div>}
             {recognitionError && <div className="error-message">{recognitionError}</div>}
-            {renderTranscriptAndFeedback()}
             <audio ref={audioRef} onEnded={() => setIsPlaying(false)} />
           </section>
         );
@@ -1270,7 +1284,26 @@ const PracticeArea = ({
                 </div>
                 {error && <div className="error-message">{error}</div>}
                 {recognitionError && <div className="error-message">{recognitionError}</div>}
-                {renderTranscriptAndFeedback()}
+                 {userTranscript && (
+                    <div className="tab-pane-content" style={{borderTop: '1px solid var(--border-color)', marginTop: '1rem'}}>
+                         {feedback ? (
+                           <div className="feedback-card" style={{marginTop: '1.5rem'}}>
+                                <h3>KI-Feedback</h3>
+                                <p>{feedback.summary}</p>
+                           </div>
+                        ) : (
+                             <div className="feedback-section" style={{paddingTop: '1rem'}}>
+                                <div className="feedback-card">
+                                  <h3>Ihre Verdolmetschung (Transkript)</h3>
+                                  <textarea className="transcript-textarea" readOnly value={userTranscript} />
+                                </div>
+                                <div className="feedback-actions">
+                                  <button className="btn btn-primary" onClick={() => getFeedback(setActiveTab)} disabled={isLoading}>Feedback anfordern</button>
+                                </div>
+                              </div>
+                        )}
+                    </div>
+                 )}
             </section>
         );
     }
@@ -1296,8 +1329,14 @@ const PracticeArea = ({
                 <button className={`tab-btn ${activeTab === 'original' ? 'active' : ''}`} onClick={() => setActiveTab('original')}>
                     Originaltext
                 </button>
-                <button className={`tab-btn ${activeTab === 'transcript' ? 'active' : ''}`} onClick={() => setActiveTab('transcript')} disabled={!userTranscript && !feedback}>
-                    Ihre Verdolmetschung
+                <button className={`tab-btn ${activeTab === 'transcript' ? 'active' : ''}`} onClick={() => setActiveTab('transcript')} disabled={!userTranscript}>
+                    Transkript
+                </button>
+                <button className={`tab-btn ${activeTab === 'feedback' ? 'active' : ''}`} onClick={() => setActiveTab('feedback')} disabled={!feedback}>
+                    KI-Feedback
+                </button>
+                <button className={`tab-btn ${activeTab === 'analysis' ? 'active' : ''}`} onClick={() => setActiveTab('analysis')} disabled={!feedback}>
+                    Fehleranalyse
                 </button>
             </nav>
 
@@ -1307,26 +1346,105 @@ const PracticeArea = ({
                         <textarea className="original-text" readOnly={!isEditing} value={isEditing ? editedText : originalText} onChange={(e) => setEditedText(e.target.value)} />
                     </div>
                 )}
-                {activeTab === 'transcript' && renderTranscriptAndFeedback()}
+                {activeTab === 'transcript' && userTranscript && (
+                    <div className="tab-pane-content">
+                        <div className="feedback-card" style={{flexGrow: 1, display: 'flex', flexDirection: 'column'}}>
+                          <div className="transcript-header">
+                            <h3>Ihre Verdolmetschung (Transkript)</h3>
+                            {isEditingTranscript ? (
+                              <button className="btn btn-primary" onClick={handleSaveTranscript}>Korrekturen übernehmen</button>
+                            ) : (
+                              <button className="btn btn-secondary" onClick={handleEditTranscript}>Transkript korrigieren</button>
+                            )}
+                          </div>
+                          <textarea
+                            className="transcript-textarea"
+                            readOnly={!isEditingTranscript}
+                            value={isEditingTranscript ? editedTranscript : userTranscript}
+                            onChange={(e) => setEditedTranscript(e.target.value)}
+                            aria-label="Transkript Ihrer Verdolmetschung"
+                          />
+                        </div>
+                        <div className="feedback-actions">
+                          <button className="btn btn-primary" onClick={() => getFeedback(setActiveTab)} disabled={isLoading || isEditingTranscript}>Feedback anfordern</button>
+                        </div>
+                    </div>
+                )}
+                {activeTab === 'feedback' && feedback && (
+                     <div className="tab-pane-content">
+                        <div className="feedback-card" style={{marginBottom: '1.5rem'}}>
+                            <h3>KI-Feedback: Zusammenfassung</h3>
+                            <p>{feedback.summary}</p>
+                        </div>
+                        <div className="feedback-card ratings-panel">
+                             <h3>Bewertung</h3>
+                             <div className="ratings">
+                                <div className="rating-item">
+                                    <span>{feedback.ratings.content}/10</span>
+                                    <span>Inhalt</span>
+                                </div>
+                                <div className="rating-item">
+                                    <span>{feedback.ratings.expression}/10</span>
+                                    <span>Ausdruck</span>
+                                </div>
+                                <div className="rating-item">
+                                    <span>{feedback.ratings.terminology}/10</span>
+                                    <span>Terminologie</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {activeTab === 'analysis' && feedback && (
+                    <div className="tab-pane-content">
+                        <div className="feedback-card" style={{flexGrow: 1}}>
+                            <h3>Fehleranalyse</h3>
+                            {feedback.errorAnalysis?.length > 0 ? (
+                                <div className="error-analysis">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Original</th>
+                                            <th>Ihre Version</th>
+                                            <th>Vorschlag</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {feedback.errorAnalysis.map((err, i) => (
+                                            <tr key={i}>
+                                                <td>{err.original}</td>
+                                                <td>{err.interpretation}</td>
+                                                <td>{err.suggestion}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                </div>
+                            ) : <p style={{paddingTop: '1rem'}}>Keine signifikanten Fehler gefunden.</p>}
+                        </div>
+                    </div>
+                )}
             </div>
             
-            <div className="controls">
-                <button className="control-btn" onClick={handlePlayPause} disabled={isEditing || (isRecording && !isSimultaneousMode) || (!voicesLoaded && settings.voiceQuality === 'Standard')} title={voicesLoaded || settings.voiceQuality === 'Premium' ? (isPlaying ? 'Stop' : 'Play') : 'Stimmen werden geladen...'}>
-                    {isPlaying ? '⏹️' : '▶️'}
-                </button>
-                <button className={`control-btn ${isRecording ? 'recording' : ''}`} onClick={handleRecord} disabled={isEditing || (isPlaying && !isSimultaneousMode)} title={isRecording ? 'Stop' : 'Aufnahme'}>
-                    {isRecording ? '⏹️' : '🎤'}
-                </button>
-                <div className="tempo-control">
-                    <label htmlFor="tempo">Tempo:</label>
-                    <input type="range" id="tempo" min="0.5" max="2" step="0.1" value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} />
-                    <span>{playbackSpeed.toFixed(1)}x</span>
+            {activeTab === 'original' && (
+                <div className="controls">
+                    <button className="control-btn" onClick={handlePlayPause} disabled={isEditing || (isRecording && !isSimultaneousMode) || (!voicesLoaded && settings.voiceQuality === 'Standard')} title={voicesLoaded || settings.voiceQuality === 'Premium' ? (isPlaying ? 'Stop' : 'Play') : 'Stimmen werden geladen...'}>
+                        {isPlaying ? '⏹️' : '▶️'}
+                    </button>
+                    <button className={`control-btn ${isRecording ? 'recording' : ''}`} onClick={handleRecord} disabled={isEditing || (isPlaying && !isSimultaneousMode)} title={isRecording ? 'Stop' : 'Aufnahme'}>
+                        {isRecording ? '⏹️' : '🎤'}
+                    </button>
+                    <div className="tempo-control">
+                        <label htmlFor="tempo">Tempo:</label>
+                        <input type="range" id="tempo" min="0.5" max="2" step="0.1" value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} />
+                        <span>{playbackSpeed.toFixed(1)}x</span>
+                    </div>
+                    <div className="timers">
+                        <span>Lesezeit: {formatTime(playbackTime)}</span>
+                        <span>Aufnahme: {formatTime(recordingTime)}</span>
+                    </div>
                 </div>
-                <div className="timers">
-                    <span>Lesezeit: {formatTime(playbackTime)}</span>
-                    <span>Aufnahme: {formatTime(recordingTime)}</span>
-                </div>
-            </div>
+            )}
             
             <audio ref={audioRef} onEnded={() => setIsPlaying(false)} />
             {error && <div className="error-message">{error}</div>}
@@ -1335,67 +1453,6 @@ const PracticeArea = ({
         </section>
     );
 };
-
-
-const FeedbackDisplay = ({ feedback, userTranscript }: { feedback: Feedback; userTranscript: string; }) => (
-    <div className="feedback-view-container">
-        <div className="summary-ratings-bar">
-            <div className="feedback-card summary-panel">
-                <h3>KI-Feedback: Zusammenfassung</h3>
-                <p>{feedback.summary}</p>
-            </div>
-            <div className="feedback-card ratings-panel">
-                 <h3>Bewertung</h3>
-                 <div className="ratings">
-                    <div className="rating-item">
-                        <span>{feedback.ratings.content}/10</span>
-                        <span>Inhalt</span>
-                    </div>
-                    <div className="rating-item">
-                        <span>{feedback.ratings.expression}/10</span>
-                        <span>Ausdruck</span>
-                    </div>
-                    <div className="rating-item">
-                        <span>{feedback.ratings.terminology}/10</span>
-                        <span>Terminologie</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div className="feedback-details-grid">
-            <div className="feedback-card transcript-panel">
-                 <h3>Ihre Verdolmetschung</h3>
-                 <div className="transcript-content">{userTranscript}</div>
-            </div>
-            <div className="feedback-card analysis-panel">
-                <h3>Fehleranalyse</h3>
-                {feedback.errorAnalysis?.length > 0 ? (
-                    <div className="error-analysis">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Original</th>
-                                <th>Ihre Version</th>
-                                <th>Vorschlag</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {feedback.errorAnalysis.map((err, i) => (
-                                <tr key={i}>
-                                    <td>{err.original}</td>
-                                    <td>{err.interpretation}</td>
-                                    <td>{err.suggestion}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    </div>
-                ) : <p style={{paddingTop: '1rem'}}>Keine signifikanten Fehler gefunden.</p>}
-            </div>
-        </div>
-    </div>
-);
-
 
 const container = document.getElementById('root');
 const root = createRoot(container!);
