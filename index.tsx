@@ -257,7 +257,11 @@ const App = () => {
                 ? SPEECH_LENGTH_CONFIG[currentSettings.speechLength]
                 : TEXT_LENGTH_CONFIG[currentSettings.mode];
 
-            const initialPrompt = `Schreibe einen Vortragstext auf ${currentSettings.sourceLang} zum Thema "${currentSettings.topic}". Der Text soll für eine Dolmetschübung geeignet sein. Die Ziellänge beträgt zwischen ${min} und ${max} Zeichen inklusive Leerzeichen. Gib nur den reinen Text ohne Titel oder Formatierung zurück.`;
+            const promptText = currentSettings.mode === 'Stegreifübersetzen'
+                ? `Schreibe einen sachlichen Text auf ${currentSettings.sourceLang} zum Thema "${currentSettings.topic}". Der Text soll für eine Stegreifübersetzungsübung geeignet sein und keine direkte Rede oder Anrede (wie "Sehr geehrte Damen und Herren") enthalten.`
+                : `Schreibe einen Vortragstext auf ${currentSettings.sourceLang} zum Thema "${currentSettings.topic}". Der Text soll für eine Dolmetschübung geeignet sein.`;
+
+            const initialPrompt = `${promptText} Die Ziellänge beträgt zwischen ${min} und ${max} Zeichen inklusive Leerzeichen. Gib nur den reinen Text ohne Titel oder Formatierung zurück.`;
             
             let currentText = '';
             let attempts = 0;
