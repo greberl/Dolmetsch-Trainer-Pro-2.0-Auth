@@ -248,7 +248,27 @@ const App = () => {
 
     try {
         if (currentSettings.mode === 'Gesprächsdolmetschen') {
-            const prompt = `Erstelle ein Interview-Skript für eine Dolmetschübung zum Thema "${currentSettings.topic}". Das Interview soll zwischen zwei Personen stattfinden. Gib mir 6 Fragen und 6 Antworten. Die Sprache ist ${currentSettings.sourceLang}. Die Fragen und Antworten sollen jeweils eine Länge von "${currentSettings.qaLength}" haben. Formattiere die Ausgabe als Text, in dem jede Frage mit "Frage X:" und jede Antwort mit "Antwort X:" beginnt. Wechsle die Sprache zwischen den Runden ab, beginnend mit ${currentSettings.sourceLang} für die erste Frage, dann ${currentSettings.targetLang} für die erste Antwort, dann ${currentSettings.sourceLang} für die zweite Frage und so weiter.`;
+            const prompt = `
+Erstelle ein Interview-Skript für eine Dolmetschübung zum Thema "${currentSettings.topic}".
+Das Interview soll zwischen zwei Personen stattfinden. Es soll aus 6 Fragen und 6 Antworten bestehen.
+Die Länge der einzelnen Fragen und Antworten soll "${currentSettings.qaLength}" betragen.
+
+**STRUKTUR UND SPRACHEN (SEHR WICHTIG):**
+- Frage 1: Sprache ${currentSettings.sourceLang}
+- Antwort 1: Sprache ${currentSettings.targetLang}
+- Frage 2: Sprache ${currentSettings.sourceLang}
+- Antwort 2: Sprache ${currentSettings.targetLang}
+- Frage 3: Sprache ${currentSettings.sourceLang}
+- Antwort 3: Sprache ${currentSettings.targetLang}
+- Frage 4: Sprache ${currentSettings.sourceLang}
+- Antwort 4: Sprache ${currentSettings.targetLang}
+- Frage 5: Sprache ${currentSettings.sourceLang}
+- Antwort 5: Sprache ${currentSettings.targetLang}
+- Frage 6: Sprache ${currentSettings.sourceLang}
+- Antwort 6: Sprache ${currentSettings.targetLang}
+
+Formattiere die Ausgabe als reinen Text. Jede Zeile muss mit "Frage X:" oder "Antwort X:" beginnen. Gib nichts anderes als das Skript zurück.
+`;
             const response = await ai.models.generateContent({ model, contents: prompt });
             setOriginalText(response.text || '');
         } else {
@@ -664,6 +684,9 @@ const splitTextIntoChunks = (text: string, maxLength = 250): string[] => {
 const parseDialogue = (text: string, sourceLang: Language, targetLang: Language): DialogueSegment[] => {
     const segments: DialogueSegment[] = [];
     const lines = text.split('\n').filter(line => line.trim() !== '');
+    let questionCounter = 0;
+    let answerCounter = 0;
+
     lines.forEach((line) => {
         const isQuestion = line.match(/^Frage\s*\d+:/i);
         const isAnswer = line.match(/^Antwort\s*\d+:/i);
@@ -673,15 +696,139 @@ const parseDialogue = (text: string, sourceLang: Language, targetLang: Language)
                 text: line.replace(/^Frage\s*\d+:/i, '').trim(),
                 lang: sourceLang
             });
+            questionCounter++;
         } else if (isAnswer) {
             segments.push({
                 type: 'Antwort',
                 text: line.replace(/^Antwort\s*\d+:/i, '').trim(),
                 lang: targetLang
             });
+            answerCounter++;
         }
     });
-    return segments;
+    // Fallback logic if languages were mixed up by AI, though new prompt should prevent this.
+    if (questionCounter > 0 && answerCounter > 0 && questionCounter === answerCounter) {
+        return segments;
+    }
+    // Simple alternation if parsing failed, as a safety net.
+    return lines.map((line, index) => {
+        const cleanText = line.replace(/^(Frage|Antwort)\s*\d+:/i, '').trim();
+        const isQuestionSegment = index % 2 === 0;
+        return {
+            type: isQuestionSegment ? 'Frage' : 'Antwort',
+            text: cleanText,
+            lang: isQuestionSegment ? sourceLang : targetLang
+        };
+    });
+};
+
+const DialogueResults = ({
+    userTranscript,
+    feedback,
+    getFeedback,
+    isLoading,
+    error,
+}: {
+    userTranscript: string;
+    feedback: Feedback | null;
+    getFeedback: () => void;
+    isLoading: boolean;
+    error: string | null;
+}) => {
+    const [activeTab, setActiveTab] = useState<'transcript' | 'feedback' | 'analysis'>('transcript');
+
+    useEffect(() => {
+        if (feedback) {
+            setActiveTab('feedback');
+        }
+    }, [feedback]);
+
+
+    return (
+        <>
+            <div className="practice-header">
+                <h2>Übungsergebnisse</h2>
+            </div>
+            <nav className="tab-nav">
+                <button className={`tab-btn ${activeTab === 'transcript' ? 'active' : ''}`} onClick={() => setActiveTab('transcript')} disabled={!userTranscript}>
+                    Transkript
+                </button>
+                <button className={`tab-btn ${activeTab === 'feedback' ? 'active' : ''}`} onClick={() => setActiveTab('feedback')} disabled={!feedback}>
+                    KI-Feedback
+                </button>
+                <button className={`tab-btn ${activeTab === 'analysis' ? 'active' : ''}`} onClick={() => setActiveTab('analysis')} disabled={!feedback}>
+                    Fehleranalyse
+                </button>
+            </nav>
+            <div className="tab-content">
+                {activeTab === 'transcript' && (
+                    <div className="tab-pane-content">
+                        <div className="feedback-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                            <div className="transcript-header">
+                                <h3>Ihre Verdolmetschung (Gesamtes Transkript)</h3>
+                            </div>
+                            <textarea
+                                className="transcript-textarea"
+                                readOnly
+                                value={userTranscript}
+                                aria-label="Gesamtes Transkript Ihrer Verdolmetschung"
+                            />
+                        </div>
+                        <div className="feedback-actions">
+                            <button className="btn btn-primary" onClick={getFeedback} disabled={isLoading || !userTranscript}>Feedback anfordern</button>
+                        </div>
+                    </div>
+                )}
+                {activeTab === 'feedback' && feedback && (
+                     <div className="tab-pane-content">
+                        <div className="feedback-card" style={{marginBottom: '1.5rem'}}>
+                            <h3>KI-Feedback: Zusammenfassung</h3>
+                            <p>{feedback.summary}</p>
+                        </div>
+                        <div className="feedback-card ratings-panel">
+                             <h3>Bewertung</h3>
+                             <div className="ratings">
+                                <div className="rating-item">
+                                    <span>{feedback.ratings.content}/10</span>
+                                    <span>Inhalt</span>
+                                </div>
+                                <div className="rating-item">
+                                    <span>{feedback.ratings.expression}/10</span>
+                                    <span>Ausdruck</span>
+                                </div>
+                                <div className="rating-item">
+                                    <span>{feedback.ratings.terminology}/10</span>
+                                    <span>Terminologie</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {activeTab === 'analysis' && feedback && (
+                    <div className="tab-pane-content">
+                        <div className="feedback-card" style={{flexGrow: 1}}>
+                            <h3>Fehleranalyse</h3>
+                            {feedback.errorAnalysis?.length > 0 ? (
+                                <div className="error-analysis">
+                                <table>
+                                    <thead>
+                                        <tr><th>Original</th><th>Ihre Version</th><th>Vorschlag</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {feedback.errorAnalysis.map((err, i) => (
+                                            <tr key={i}><td>{err.original}</td><td>{err.interpretation}</td><td>{err.suggestion}</td></tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                </div>
+                            ) : <p style={{paddingTop: '1rem'}}>Keine signifikanten Fehler gefunden.</p>}
+                        </div>
+                    </div>
+                )}
+            </div>
+            {error && <div className="error-message" style={{marginTop: '1rem'}}>{error}</div>}
+        </>
+    );
 };
 
 
@@ -1210,52 +1357,13 @@ const PracticeArea = ({
                 </div>
               </>
             ) : (
-                <div className="tab-content">
-                    <div className="tab-pane-content">
-                        {feedback ? (
-                            <>
-                                <div className="feedback-card" style={{ marginBottom: '1.5rem' }}>
-                                    <h3>KI-Feedback: Zusammenfassung</h3>
-                                    <p>{feedback.summary}</p>
-                                </div>
-                                <div className="feedback-card">
-                                    <h3>Fehleranalyse</h3>
-                                    {feedback.errorAnalysis?.length > 0 ? (
-                                        <div className="error-analysis">
-                                            <table>
-                                                <thead>
-                                                    <tr><th>Original</th><th>Ihre Version</th><th>Vorschlag</th></tr>
-                                                </thead>
-                                                <tbody>
-                                                    {feedback.errorAnalysis.map((err, i) => (
-                                                        <tr key={i}><td>{err.original}</td><td>{err.interpretation}</td><td>{err.suggestion}</td></tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    ) : <p style={{ paddingTop: '1rem' }}>Keine signifikanten Fehler gefunden.</p>}
-                                </div>
-                            </>
-                        ) : (
-                             <>
-                                <div className="feedback-card" style={{flexGrow: 1, display: 'flex', flexDirection: 'column'}}>
-                                  <div className="transcript-header">
-                                    <h3>Ihre Verdolmetschung (Gesamtes Transkript)</h3>
-                                  </div>
-                                  <textarea
-                                    className="transcript-textarea"
-                                    readOnly
-                                    value={userTranscript}
-                                    aria-label="Gesamtes Transkript Ihrer Verdolmetschung"
-                                  />
-                                </div>
-                                <div className="feedback-actions">
-                                  <button className="btn btn-primary" onClick={getFeedback} disabled={isLoading}>Feedback anfordern</button>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
+                <DialogueResults 
+                    userTranscript={userTranscript}
+                    feedback={feedback}
+                    getFeedback={getFeedback}
+                    isLoading={isLoading}
+                    error={error}
+                />
             )}
             {error && <div className="error-message">{error}</div>}
             {playbackError && <div className="error-message">{playbackError}</div>}
