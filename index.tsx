@@ -823,6 +823,7 @@ const PracticeArea = ({
   const [dialogueSegments, setDialogueSegments] = useState<DialogueSegment[]>([]);
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
   const [dialogueState, setDialogueState] = useState<DialogueState>('idle');
+  const [isSegmentTextVisible, setIsSegmentTextVisible] = useState(false);
   const dialogueTranscriptsRef = useRef<string[]>([]);
 
   const stopPlayback = useCallback(() => {
@@ -958,6 +959,7 @@ const PracticeArea = ({
   }, [originalText, settings.mode, settings.sourceLang, settings.targetLang]);
   
   const advanceToNextSegment = useCallback((lastTranscript: string) => {
+    setIsSegmentTextVisible(false);
     dialogueTranscriptsRef.current.push(lastTranscript);
     const nextIndex = currentSegmentIndex + 1;
 
@@ -978,6 +980,7 @@ const PracticeArea = ({
 
   const startDialogue = useCallback(() => {
     if (dialogueSegments.length > 0) {
+      setIsSegmentTextVisible(false);
       const firstSegment = dialogueSegments[0];
       setDialogueState('synthesizing');
       playText(firstSegment.text, firstSegment.lang, () => {
@@ -1059,12 +1062,24 @@ const PracticeArea = ({
                     {dialogueState === 'ready' && (
                         <button className="btn btn-primary" onClick={startDialogue}>Dialog starten</button>
                     )}
-                    {dialogueState === 'synthesizing' && (
-                        <p className="segment-text-hidden">Bitte hören Sie aufmerksam zu...</p>
+                    
+                    {['synthesizing', 'waiting_for_record', 'recording'].includes(dialogueState) && segment && (
+                        <div className="dialogue-text-container">
+                             {isSegmentTextVisible ? (
+                                <p className="segment-text">{segment.text}</p>
+                            ) : (
+                                <p className="segment-text-hidden">
+                                    {dialogueState === 'synthesizing' 
+                                        ? 'Bitte hören Sie aufmerksam zu...' 
+                                        : 'Sie sind an der Reihe zu dolmetschen...'}
+                                </p>
+                            )}
+                            <button className="btn btn-secondary btn-show-text" onClick={() => setIsSegmentTextVisible(p => !p)}>
+                                {isSegmentTextVisible ? 'Text ausblenden' : 'Text anzeigen'}
+                            </button>
+                        </div>
                     )}
-                    {(dialogueState === 'waiting_for_record' || dialogueState === 'recording') && (
-                        <p className="segment-text-hidden">Sie sind an der Reihe zu dolmetschen...</p>
-                    )}
+                    
                      {dialogueState === 'finished' && (
                          <p className="segment-text-hidden">Übung abgeschlossen</p>
                     )}

@@ -485,7 +485,23 @@ textarea.form-control {
     border-radius: var(--border-radius);
     padding: 2rem;
     text-align: center;
-    background-color: #fff;
+    background-color: #f8f9fa;
+}
+
+.dialogue-text-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    width: 100%;
+    height: 100%;
+}
+
+.btn-show-text {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 500;
 }
 
 .segment-text {
