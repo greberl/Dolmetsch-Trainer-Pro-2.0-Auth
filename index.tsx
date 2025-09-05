@@ -248,8 +248,8 @@ const App = () => {
   const [exerciseStarted, setExerciseStarted] = useState(false);
   const [dialogueFinished, setDialogueFinished] = useState(false);
   const [structuredDialogueResults, setStructuredDialogueResults] = useState<StructuredDialogueResult[] | null>(null);
-  // Fix: Use a lazy initializer for `useState` to resolve an error where `Date.now()` was not being accepted as an argument.
-  const [exerciseId, setExerciseId] = useState(() => Date.now());
+  // Fix: Changed from a lazy initializer to a direct value to resolve an "Expected 1 arguments, but got 0" error.
+  const [exerciseId, setExerciseId] = useState(Date.now());
   
   if (!ai) {
     return <ApiKeyErrorDisplay />;
@@ -1058,12 +1058,6 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
     setSegments(parsedSegments);
     setDialogueState('ready');
   }, [originalText, settings.sourceLang, settings.targetLang]);
-  
-  useEffect(() => {
-    if (dialogueState === 'ready' && segments.length > 0) {
-        setDialogueState('starting');
-    }
-  }, [dialogueState, segments]);
 
   useEffect(() => {
     const playCurrentSegment = async () => {
@@ -1219,6 +1213,12 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
     }
   };
   
+  const handleStartDialogue = () => {
+    if (segments.length > 0) {
+        setDialogueState('starting');
+    }
+  };
+  
   const getStatusText = () => {
     switch(dialogueState) {
         case 'idle':
@@ -1242,6 +1242,18 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
   };
   
   const currentSegment = segments[currentSegmentIndex];
+
+  if (['idle', 'ready'].includes(dialogueState)) {
+    return (
+        <div className="dialogue-start-container">
+            <h3>Gesprächssimulation bereit</h3>
+            <p>Drücken Sie auf "Start", um das Gespräch zu beginnen. Der erste Redebeitrag wird dann automatisch abgespielt.</p>
+            <button onClick={handleStartDialogue} className="btn btn-primary btn-large" disabled={segments.length === 0}>
+                Gespräch starten
+            </button>
+        </div>
+    );
+  }
 
   return (
     <div className="dialogue-practice-container">
