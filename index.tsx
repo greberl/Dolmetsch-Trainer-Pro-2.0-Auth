@@ -287,7 +287,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
                 : TEXT_LENGTH_CONFIG[currentSettings.mode];
 
             const promptText = currentSettings.mode === 'Stegreifübersetzen'
-                ? `Erstelle einen sachlichen Text zum Thema "${currentSettings.topic}". WICHTIG: Der Text muss vollständig in ${currentSettings.sourceLang} verfasst sein. Der Text ist für eine Stegreifübersetzungsübung und sollte keine direkte Anrede (wie "Sehr geehrte Damen und Herren") oder Dialoge enthalten.`
+                ? `Erstelle einen sachlichen Text zum Thema "${currentSettings.topic}". WICHTIG: Der Text muss vollständig auf ${currentSettings.sourceLang} verfasst sein. Der Text ist für eine Stegreifübersetzungsübung und sollte keine direkte Anrede (wie "Sehr geehrte Damen und Herren") oder Dialoge enthalten.`
                 : `Schreibe einen Vortragstext auf ${currentSettings.sourceLang} zum Thema "${currentSettings.topic}". Der Text soll für eine Dolmetschübung geeignet sein.`;
 
             const initialPrompt = `${promptText} Die Ziellänge beträgt zwischen ${min} und ${max} Zeichen inklusive Leerzeichen. Gib nur den reinen Text ohne Titel oder Formatierung zurück.`;
@@ -365,7 +365,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
     }
   }, [ai]);
 
-  const getFeedback = useCallback(async () => {
+  const getFeedback = useCallback(async (textToCompare?: string) => {
       if (!userTranscript) {
           setError("Kein Transkript vorhanden, um Feedback zu erhalten.");
           return;
@@ -374,6 +374,8 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
       setLoadingMessage('Analysiere und generiere Feedback...');
       setError(null);
       setFeedback(null);
+
+      const textForFeedback = textToCompare ?? originalText;
 
       try {
         const prompt = `Du bist ein erfahrener Coach für Dolmetscher. Deine Aufgabe ist es, eine mündliche Verdolmetschung zu bewerten. Das Transkript des Nutzers ist eine automatische Spracherkennung und wurde bereits mit Zeichensetzung versehen.
@@ -388,7 +390,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
 
 **AUFGABE:**
 Bewerte die folgende Verdolmetschung basierend auf den obigen Anweisungen:
-Originaltext (${settings.sourceLang}): "${originalText}"
+Originaltext (${settings.sourceLang}): "${textForFeedback}"
 Verdolmetschung des Nutzers (Transkript) (${settings.targetLang}): "${userTranscript}"
 
 Gib dein Feedback als JSON-Objekt.
@@ -784,7 +786,7 @@ const DialogueResults = ({ originalText, userTranscript, feedback, getFeedback, 
     originalText: string;
     userTranscript: string;
     feedback: Feedback | null;
-    getFeedback: () => void;
+    getFeedback: (textToCompare?: string) => void;
     isLoading: boolean;
     loadingMessage: string;
     error: string | null;
@@ -833,7 +835,7 @@ const DialogueResults = ({ originalText, userTranscript, feedback, getFeedback, 
                     )}
                     {activeTab === 'feedback' && (
                         <div className="text-area">
-                           <FeedbackDisplay feedback={feedback} getFeedback={getFeedback} userTranscript={userTranscript} />
+                           <FeedbackDisplay feedback={feedback} getFeedback={() => getFeedback()} userTranscript={userTranscript} />
                         </div>
                     )}
                 </div>
@@ -852,7 +854,7 @@ const PracticeArea = ({
   onPremiumVoiceAuthError, onDialogueFinished,
 }: {
   isLoading: boolean; loadingMessage: string; originalText: string;
-  onRecordingFinished: (transcript: string) => void; getFeedback: () => void;
+  onRecordingFinished: (transcript: string) => void; getFeedback: (textToCompare?: string) => void;
   userTranscript: string; feedback: Feedback | null; error: string | null; settings: Settings;
   exerciseStarted: boolean; onPremiumVoiceAuthError: () => void;
   onDialogueFinished: (results: StructuredDialogueResult[]) => void;
@@ -860,6 +862,8 @@ const PracticeArea = ({
   const [activeTab, setActiveTab] = useState<PracticeAreaTab>('original');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editableOriginalText, setEditableOriginalText] = useState(originalText);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
@@ -869,6 +873,25 @@ const PracticeArea = ({
   const [dialogueState, setDialogueState] = useState<DialogueState>('idle');
   const [isSegmentTextVisible, setIsSegmentTextVisible] = useState(false);
   const dialogueResultsRef = useRef<StructuredDialogueResult[]>([]);
+  
+  useEffect(() => {
+    setEditableOriginalText(originalText);
+  }, [originalText]);
+
+  useEffect(() => {
+    // Automatically switch to transcript tab when a new transcript is generated.
+    if (userTranscript && !feedback) {
+      setActiveTab('transcript');
+    }
+  }, [userTranscript, feedback]);
+
+  useEffect(() => {
+    // Automatically switch to feedback tab when new feedback is generated.
+    if (feedback) {
+      setActiveTab('feedback');
+    }
+  }, [feedback]);
+
 
   const stopPlayback = useCallback(() => {
     if (audioRef.current) {
@@ -982,6 +1005,11 @@ const PracticeArea = ({
   const stopRecording = useCallback(() => {
       recognitionRef.current?.stop();
   }, []);
+
+  const getFeedbackForCurrentText = () => {
+    const textForFeedback = settings.mode === 'Stegreifübersetzen' ? editableOriginalText : originalText;
+    getFeedback(textForFeedback);
+  };
 
   // --- Effect and Logic for Dialogue Interpreting ---
   useEffect(() => {
@@ -1180,23 +1208,39 @@ const PracticeArea = ({
       <div className="tab-content">
         {activeTab === 'original' && (
           <>
-            {settings.mode !== 'Stegreifübersetzen' && (
-              <div className="controls-bar">
-                <button onClick={() => playText(originalText, settings.sourceLang)} disabled={isPlaying || isRecording}>
-                  {isPlaying ? 'Spielt...' : '▶ Abspielen'}
-                </button>
-                <button onClick={stopPlayback} disabled={!isPlaying}>■ Stopp</button>
-              </div>
-            )}
+            <div className="controls-bar">
+                {settings.mode === 'Stegreifübersetzen' && (
+                  <button onClick={() => setIsEditing(prev => !prev)}>
+                    {isEditing ? '✓ Speichern' : '✎ Bearbeiten'}
+                  </button>
+                )}
+                {settings.mode !== 'Stegreifübersetzen' && (
+                  <>
+                    <button onClick={() => playText(editableOriginalText, settings.sourceLang)} disabled={isPlaying || isRecording}>
+                      {isPlaying ? 'Spielt...' : '▶ Abspielen'}
+                    </button>
+                    <button onClick={stopPlayback} disabled={!isPlaying}>■ Stopp</button>
+                  </>
+                )}
+            </div>
             <div className="text-area">
-              <p>{originalText}</p>
+               {isEditing && settings.mode === 'Stegreifübersetzen' ? (
+                <textarea
+                  className="text-area-editor"
+                  value={editableOriginalText}
+                  onChange={(e) => setEditableOriginalText(e.target.value)}
+                  aria-label="Originaltext bearbeiten"
+                />
+              ) : (
+                <p>{editableOriginalText}</p>
+              )}
             </div>
           </>
         )}
         {activeTab === 'transcript' && (
           <>
             <div className="controls-bar">
-              <button onClick={getFeedback} disabled={!userTranscript.trim() || isRecording}>Feedback erhalten</button>
+              <button onClick={getFeedbackForCurrentText} disabled={!userTranscript.trim() || isRecording}>Feedback erhalten</button>
             </div>
              <div className="text-area">
               <p>{userTranscript || "Noch kein Transkript vorhanden. Machen Sie eine Aufnahme."}</p>
@@ -1205,7 +1249,7 @@ const PracticeArea = ({
         )}
         {activeTab === 'feedback' && (
            <div className="text-area">
-               <FeedbackDisplay feedback={feedback} getFeedback={getFeedback} userTranscript={userTranscript} />
+               <FeedbackDisplay feedback={feedback} getFeedback={getFeedbackForCurrentText} userTranscript={userTranscript} />
            </div>
         )}
       </div>
