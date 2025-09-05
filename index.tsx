@@ -52,7 +52,7 @@ type SourceTextType = "ai" | "upload";
 type QALength = "1-3 Sätze" | "2-4 Sätze" | "3-5 Sätze" | "4-6 Sätze";
 type SpeechLength = "Kurz" | "Mittel" | "Prüfung";
 type VoiceQuality = "Standard" | "Premium";
-type DialogueState = 'idle' | 'ready' | 'synthesizing' | 'playing' | 'waiting_for_record' | 'recording' | 'finished' | 'starting';
+type DialogueState = 'idle' | 'synthesizing' | 'playing' | 'waiting_for_record' | 'recording' | 'processing' | 'finished';
 type PracticeAreaTab = 'original' | 'transcript' | 'feedback';
 
 
@@ -189,19 +189,31 @@ const synthesizeSpeechGoogleCloud = async (text: string, language: Language, api
         })
     });
 
-    // Fix: The response body can only be consumed once.
-    // Parse the JSON response here and use the resulting object for both error and success handling.
-    const data = await response.json();
+    // Fix: The response body can only be consumed once, so we read it as text first.
+    // This provides more robust error handling than calling response.json() directly.
+    const responseBody = await response.text();
 
     if (!response.ok) {
-        console.error("Google TTS API Error:", JSON.stringify(data, null, 2));
-        const message = `Fehler bei der Sprachsynthese: ${data.error?.message || 'Unbekannter Fehler'}`;
-        // Check for common API key-related errors to allow for graceful fallback.
-        if (response.status === 403 || response.status === 400 || data.error?.message?.toLowerCase().includes('api key not valid')) {
+        let errorData;
+        try {
+            // Attempt to parse the error response as JSON
+            errorData = JSON.parse(responseBody);
+        } catch (e) {
+            // If parsing fails, the body was not JSON. Use the raw text for the error.
+            console.error("Google TTS API Error (non-JSON response):", responseBody);
+            throw new Error(`Fehler bei der Sprachsynthese: ${responseBody}`);
+        }
+        
+        console.error("Google TTS API Error:", JSON.stringify(errorData, null, 2));
+        const message = `Fehler bei der Sprachsynthese: ${errorData.error?.message || 'Unbekannter Fehler'}`;
+        
+        if (response.status === 403 || response.status === 400 || errorData.error?.message?.toLowerCase().includes('api key not valid')) {
              throw new TtsAuthError(message);
         }
         throw new Error(message);
     }
+
+    const data = JSON.parse(responseBody);
 
     if (!data.audioContent) {
         throw new Error("Keine Audiodaten von der TTS-API erhalten.");
@@ -248,8 +260,7 @@ const App = () => {
   const [exerciseStarted, setExerciseStarted] = useState(false);
   const [dialogueFinished, setDialogueFinished] = useState(false);
   const [structuredDialogueResults, setStructuredDialogueResults] = useState<StructuredDialogueResult[] | null>(null);
-  // Fix: Changed from a lazy initializer to a direct value to resolve an "Expected 1 arguments, but got 0" error.
-  const [exerciseId, setExerciseId] = useState(Date.now());
+  const [exerciseId, setExerciseId] = useState(() => Date.now());
   
   if (!ai) {
     return <ApiKeyErrorDisplay />;
@@ -1038,11 +1049,6 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
   const recognition = useRef<SpeechRecognition | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // FIX: Create a ref to hold the current dialogue state to avoid stale closures in callbacks.
-  const dialogueStateRef = useRef(dialogueState);
-  useEffect(() => {
-    dialogueStateRef.current = dialogueState;
-  }, [dialogueState]);
 
   useEffect(() => {
     const lines = originalText.trim().split('\n').filter(line => line.length > 0);
@@ -1056,16 +1062,16 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
         };
     });
     setSegments(parsedSegments);
-    setDialogueState('ready');
+    if (parsedSegments.length > 0) {
+        setDialogueState('synthesizing');
+    }
   }, [originalText, settings.sourceLang, settings.targetLang]);
 
   useEffect(() => {
     const playCurrentSegment = async () => {
-        if (dialogueState === 'starting' && segments.length > 0) {
+        if (dialogueState === 'synthesizing' && segments.length > 0) {
             const segment = segments[currentSegmentIndex];
             if (!segment) return;
-
-            setDialogueState('synthesizing');
             
             try {
                 let audioSrc = '';
@@ -1116,7 +1122,6 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
             audioRef.current = null;
         }
     };
-    // Fix: Removed non-existent property `settings.lang` from the dependency array.
 }, [dialogueState, currentSegmentIndex, segments, isPremiumVoiceAvailable, onAuthError, settings.voiceQuality, settings.sourceLang, settings.targetLang]);
 
   const handleNextSegment = useCallback(() => {
@@ -1133,14 +1138,23 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
     setIsCurrentTextVisible(false);
 
     if (currentSegmentIndex < segments.length - 1) {
-        setCurrentSegmentIndex(prev => prev + 1);
-        setDialogueState('starting');
+        setCurrentSegmentIndex(prevIndex => prevIndex + 1);
+        setDialogueState('synthesizing');
     } else {
         setDialogueState('finished');
         onFinish(updatedResults);
     }
   }, [currentSegmentIndex, segments, onFinish, results, onUpdateResults, currentTranscript, settings.targetLang, settings.sourceLang]);
+  
+  // This effect triggers the processing of results after a recording has finished.
+  useEffect(() => {
+    if (dialogueState === 'processing') {
+      handleNextSegment();
+    }
+  }, [dialogueState, handleNextSegment]);
 
+
+  // This effect manages the lifecycle of the SpeechRecognition object.
   useEffect(() => {
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionAPI) {
@@ -1157,72 +1171,53 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
       rec.continuous = true;
       rec.interimResults = true;
       
-      let finalTranscriptForSegment = ''; // Closure variable to accumulate final transcript
+      let finalTranscriptForSegment = '';
 
       rec.onresult = (event: SpeechRecognitionEvent) => {
         let interimTranscript = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
             if (event.results[i].isFinal) {
-                finalTranscriptForSegment += event.results[i][0].transcript;
+                finalTranscriptForSegment += event.results[i][0].transcript.trim() + ' ';
             } else {
                 interimTranscript += event.results[i][0].transcript;
             }
         }
         setCurrentTranscript(finalTranscriptForSegment + interimTranscript);
       };
-
-      rec.onend = () => {
-        // FIX: Use the state ref to check the most up-to-date state.
-        if (dialogueStateRef.current === 'recording') {
-          handleNextSegment();
-        }
-      };
+      
+      rec.onend = () => setDialogueState('processing');
       
       rec.onerror = (event: SpeechRecognitionErrorEvent) => {
         console.error('Speech recognition error', event.error);
-        handleNextSegment();
+        setDialogueState('processing');
       };
       
       rec.start();
-    } else if (recognition.current) {
-      recognition.current.stop();
     }
 
     return () => {
       if (recognition.current) {
-        recognition.current.onresult = () => {};
-        recognition.current.onend = () => {};
-        recognition.current.onerror = () => {};
         recognition.current.stop();
         recognition.current = null;
       }
     };
-  }, [dialogueState, handleNextSegment, settings.targetLang, settings.sourceLang, segments, currentSegmentIndex]);
+  }, [dialogueState, settings.targetLang, settings.sourceLang, segments, currentSegmentIndex]);
 
 
   const handleRecordClick = () => {
-    if (audioRef.current && !audioRef.current.paused) {
-      audioRef.current.pause();
-    }
-    
     if (dialogueState === 'recording') {
-      setDialogueState('waiting_for_record');
+        if(recognition.current) {
+            recognition.current.stop();
+        }
     } else if (dialogueState === 'waiting_for_record') {
       setCurrentTranscript('');
       setDialogueState('recording');
     }
   };
   
-  const handleStartDialogue = () => {
-    if (segments.length > 0) {
-        setDialogueState('starting');
-    }
-  };
-  
   const getStatusText = () => {
     switch(dialogueState) {
         case 'idle':
-        case 'ready':
             return "Übung wird geladen...";
         case 'synthesizing':
             return "Audio wird vorbereitet...";
@@ -1232,28 +1227,16 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
             return "Sie sind dran. Drücken Sie den Aufnahme-Button.";
         case 'recording':
             return "Ihre Verdolmetschung wird aufgenommen...";
+        case 'processing':
+            return "Aufnahme wird verarbeitet...";
         case 'finished':
             return "Gespräch beendet.";
-        case 'starting':
-             return `Beginne Segment ${currentSegmentIndex + 1}/${segments.length}...`;
         default:
             return "Bereit";
     }
   };
   
   const currentSegment = segments[currentSegmentIndex];
-
-  if (['idle', 'ready'].includes(dialogueState)) {
-    return (
-        <div className="dialogue-start-container">
-            <h3>Gesprächssimulation bereit</h3>
-            <p>Drücken Sie auf "Start", um das Gespräch zu beginnen. Der erste Redebeitrag wird dann automatisch abgespielt.</p>
-            <button onClick={handleStartDialogue} className="btn btn-primary btn-large" disabled={segments.length === 0}>
-                Gespräch starten
-            </button>
-        </div>
-    );
-  }
 
   return (
     <div className="dialogue-practice-container">
