@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 // --- WEB SPEECH API TYPES ---
 // Fix for TS2304, TS2339: Provide types for the browser's SpeechRecognition API.
@@ -248,8 +248,8 @@ const App = () => {
   const [exerciseStarted, setExerciseStarted] = useState(false);
   const [dialogueFinished, setDialogueFinished] = useState(false);
   const [structuredDialogueResults, setStructuredDialogueResults] = useState<StructuredDialogueResult[] | null>(null);
-  // Fix: Replaced lazy state initialization `useState(Date.now)` with `useState(Date.now())` to resolve a potential tooling error.
-  const [exerciseId, setExerciseId] = useState(Date.now());
+  // Fix: Use a lazy initializer for `useState` to resolve an error where `Date.now()` was not being accepted as an argument.
+  const [exerciseId, setExerciseId] = useState(() => Date.now());
   
   if (!ai) {
     return <ApiKeyErrorDisplay />;
@@ -1162,19 +1162,19 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
       rec.lang = LANGUAGE_CODES[interpretationLang];
       rec.continuous = true;
       rec.interimResults = true;
+      
+      let finalTranscriptForSegment = ''; // Closure variable to accumulate final transcript
 
       rec.onresult = (event: SpeechRecognitionEvent) => {
         let interimTranscript = '';
-        let finalTranscript = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
             if (event.results[i].isFinal) {
-                finalTranscript += event.results[i][0].transcript;
+                finalTranscriptForSegment += event.results[i][0].transcript;
             } else {
                 interimTranscript += event.results[i][0].transcript;
             }
         }
-        // This logic is for continuous transcription, need to adjust for dialogue
-        setCurrentTranscript(prev => finalTranscript + interimTranscript);
+        setCurrentTranscript(finalTranscriptForSegment + interimTranscript);
       };
 
       rec.onend = () => {
@@ -1196,9 +1196,9 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
 
     return () => {
       if (recognition.current) {
-        recognition.current.onresult = null;
-        recognition.current.onend = null;
-        recognition.current.onerror = null;
+        recognition.current.onresult = () => {};
+        recognition.current.onend = () => {};
+        recognition.current.onerror = () => {};
         recognition.current.stop();
         recognition.current = null;
       }
