@@ -248,7 +248,8 @@ const App = () => {
   const [exerciseStarted, setExerciseStarted] = useState(false);
   const [dialogueFinished, setDialogueFinished] = useState(false);
   const [structuredDialogueResults, setStructuredDialogueResults] = useState<StructuredDialogueResult[] | null>(null);
-  const [exerciseId, setExerciseId] = useState(() => Date.now());
+  // Fix: Pass the initializer function directly to useState to avoid a potential tooling error.
+  const [exerciseId, setExerciseId] = useState(Date.now);
   
   if (!ai) {
     return <ApiKeyErrorDisplay />;
@@ -293,7 +294,7 @@ Frage 3: Wie können einzelne Personen beitragen?
 Antwort 3: Individuals can contribute by reducing their carbon footprint, for instance, through less consumption and more recycling.
 `;
             const response = await ai.models.generateContent({ model, contents: prompt });
-            setOriginalText(response.text);
+            setOriginalText(response.text || '');
         } else {
             const isSpeechMode = ["Vortragsdolmetschen", "Simultandolmetschen", "Shadowing"].includes(currentSettings.mode);
             const { min, max } = isSpeechMode
@@ -311,7 +312,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
             
             setLoadingMessage('Generiere Text (Versuch 1)...');
             let response = await ai.models.generateContent({ model, contents: initialPrompt });
-            currentText = response.text; 
+            currentText = response.text || ''; 
 
             while ((currentText.length < min || currentText.length > max) && attempts < 4) {
                 attempts++;
@@ -326,7 +327,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
 
 
                 response = await ai.models.generateContent({ model, contents: adjustmentPrompt });
-                currentText = response.text;
+                currentText = response.text || '';
             }
             setOriginalText(currentText);
         }
@@ -461,7 +462,7 @@ Gib dein Feedback als JSON-Objekt.
             },
         });
         
-        const jsonStr = (response.text).trim();
+        const jsonStr = (response.text || '').trim();
         if (!jsonStr) {
             throw new Error("Leere Antwort von der Feedback-API erhalten.");
         }
