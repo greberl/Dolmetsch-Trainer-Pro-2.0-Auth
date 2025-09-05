@@ -235,6 +235,7 @@ const App = () => {
   const [exerciseStarted, setExerciseStarted] = useState(false);
   const [dialogueFinished, setDialogueFinished] = useState(false);
   const [structuredDialogueResults, setStructuredDialogueResults] = useState<StructuredDialogueResult[] | null>(null);
+  const [exerciseId, setExerciseId] = useState(() => Date.now());
   
   if (!ai) {
     return <ApiKeyErrorDisplay />;
@@ -251,6 +252,7 @@ const App = () => {
     setOriginalText('');
     setFeedback(null);
     setUserTranscript('');
+    setExerciseId(Date.now());
 
     try {
         if (currentSettings.mode === 'Gesprächsdolmetschen') {
@@ -329,6 +331,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
       setExerciseStarted(false);
       setDialogueFinished(false);
       setStructuredDialogueResults(null);
+      setExerciseId(Date.now());
       if (newSettings.sourceType === 'upload' && fileContent) {
           setOriginalText(fileContent);
           setExerciseStarted(true);
@@ -366,6 +369,10 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
   
   const handleTranscriptChange = (newTranscript: string) => {
     setUserTranscript(newTranscript);
+  };
+
+  const handleOriginalTextChange = (newText: string) => {
+    setOriginalText(newText);
   };
 
   const getFeedback = useCallback(async (textToCompare?: string) => {
@@ -489,12 +496,13 @@ Gib dein Feedback als JSON-Objekt.
               />
             ) : (
               <PracticeArea
-                  key={originalText} // Remount component when text changes
+                  key={exerciseId} // Remount component when exerciseId changes
                   isLoading={isLoading} 
                   loadingMessage={loadingMessage}
                   originalText={originalText}
                   onRecordingFinished={handleRecordingFinished}
                   onTranscriptChange={handleTranscriptChange}
+                  onOriginalTextChange={handleOriginalTextChange}
                   getFeedback={getFeedback}
                   userTranscript={userTranscript}
                   feedback={feedback}
@@ -674,6 +682,7 @@ const PracticeArea = ({
     originalText,
     onRecordingFinished,
     onTranscriptChange,
+    onOriginalTextChange,
     getFeedback,
     userTranscript,
     feedback,
@@ -688,6 +697,7 @@ const PracticeArea = ({
     originalText: string,
     onRecordingFinished: (transcript: string) => void,
     onTranscriptChange: (newTranscript: string) => void,
+    onOriginalTextChange: (newText: string) => void,
     getFeedback: (textToCompare?: string) => void,
     userTranscript: string,
     feedback: Feedback | null,
@@ -836,6 +846,7 @@ const PracticeArea = ({
                         settings={settings}
                         isSpeechMode={isSpeechMode}
                         onPremiumVoiceAuthError={onPremiumVoiceAuthError}
+                        onTextChange={onOriginalTextChange}
                     />
                 )}
                  {activeTab === 'transcript' && (
@@ -868,11 +879,12 @@ const PracticeArea = ({
 };
 
 
-const TextDisplay = ({ text, settings, isSpeechMode, onPremiumVoiceAuthError }: { text: string, settings: Settings, isSpeechMode: boolean, onPremiumVoiceAuthError: () => void }) => {
+const TextDisplay = ({ text, settings, isSpeechMode, onPremiumVoiceAuthError, onTextChange }: { text: string, settings: Settings, isSpeechMode: boolean, onPremiumVoiceAuthError: () => void, onTextChange: (newText: string) => void }) => {
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [playbackRate, setPlaybackRate] = useState(1);
     const [charCount, setCharCount] = useState(0);
+    const [isEditing, setIsEditing] = useState(false);
 
     const handlePlayPause = async () => {
         if (isPlaying) {
@@ -950,36 +962,60 @@ const TextDisplay = ({ text, settings, isSpeechMode, onPremiumVoiceAuthError }: 
 
 
     return (
-        <div className="text-area">
-             {(isSpeechMode || settings.mode === 'Stegreifübersetzen') && (
-                <div className="controls-bar">
-                    {isSpeechMode && (
-                        <>
-                           <button onClick={handlePlayPause} disabled={!text} className="btn-play-pause" aria-label={isPlaying ? "Pausieren" : "Abspielen"}>
-                                {isPlaying ? (
-                                    <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M0 0h24v24H0V0z" fill="none" /><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-                                ) : (
-                                    <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M0 0h24v24H0V0z" fill="none" /><path d="M8 5v14l11-7L8 5z" /></svg>
-                                )}
-                            </button>
-                            <label htmlFor="playbackRate">Geschwindigkeit: {playbackRate.toFixed(1)}x</label>
-                            <input
-                                type="range"
-                                id="playbackRate"
-                                name="playbackRate"
-                                min="0.5"
-                                max="1.5"
-                                step="0.1"
-                                value={playbackRate}
-                                onChange={handleRateChange}
-                            />
-                        </>
-                    )}
-                     <p>Zeichen (inkl. Leerzeichen): {charCount}</p>
-                </div>
-            )}
-            <p>{text || "Kein Text zum Anzeigen."}</p>
-        </div>
+        <>
+            <div className="text-area">
+                 {(isSpeechMode || settings.mode === 'Stegreifübersetzen') && (
+                    <div className="controls-bar">
+                        {isSpeechMode && (
+                            <>
+                               <button onClick={handlePlayPause} disabled={!text || isEditing} className="btn-play-pause" aria-label={isPlaying ? "Pausieren" : "Abspielen"}>
+                                    {isPlaying ? (
+                                        <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M0 0h24v24H0V0z" fill="none" /><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                                    ) : (
+                                        <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M0 0h24v24H0V0z" fill="none" /><path d="M8 5v14l11-7L8 5z" /></svg>
+                                    )}
+                                </button>
+                                <label htmlFor="playbackRate">Geschwindigkeit: {playbackRate.toFixed(1)}x</label>
+                                <input
+                                    type="range"
+                                    id="playbackRate"
+                                    name="playbackRate"
+                                    min="0.5"
+                                    max="1.5"
+                                    step="0.1"
+                                    value={playbackRate}
+                                    onChange={handleRateChange}
+                                    disabled={isEditing}
+                                />
+                            </>
+                        )}
+                         <p>Zeichen (inkl. Leerzeichen): {charCount}</p>
+                    </div>
+                )}
+                {isEditing ? (
+                     <textarea 
+                        className="form-control text-area-editor"
+                        value={text}
+                        onChange={(e) => onTextChange(e.target.value)}
+                        placeholder="Originaltext hier bearbeiten..."
+                        autoFocus
+                    />
+                ) : (
+                    <p>{text || "Kein Text zum Anzeigen."}</p>
+                )}
+            </div>
+            <div className="controls-bar" style={{marginTop: '1rem', justifyContent: 'flex-end'}}>
+                 {isEditing ? (
+                     <button className="btn btn-secondary" onClick={() => setIsEditing(false)}>
+                        Fertig
+                     </button>
+                ) : (
+                     <button className="btn btn-secondary" onClick={() => setIsEditing(true)} disabled={!text}>
+                        Bearbeiten
+                     </button>
+                )}
+            </div>
+        </>
     );
 };
 
