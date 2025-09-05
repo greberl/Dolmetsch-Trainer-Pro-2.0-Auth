@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -279,7 +278,7 @@ Frage 3: Wie können einzelne Personen beitragen?
 Antwort 3: Individuals can contribute by reducing their carbon footprint, for instance, through less consumption and more recycling.
 `;
             const response = await ai.models.generateContent({ model, contents: prompt });
-            setOriginalText(response.text || '');
+            setOriginalText(response.text ?? '');
         } else {
             const isSpeechMode = ["Vortragsdolmetschen", "Simultandolmetschen", "Shadowing"].includes(currentSettings.mode);
             const { min, max } = isSpeechMode
@@ -297,7 +296,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
             
             setLoadingMessage('Generiere Text (Versuch 1)...');
             let response = await ai.models.generateContent({ model, contents: initialPrompt });
-            currentText = response.text || ''; 
+            currentText = response.text ?? ''; 
 
             while ((currentText.length < min || currentText.length > max) && attempts < 4) {
                 attempts++;
@@ -312,7 +311,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
 
 
                 response = await ai.models.generateContent({ model, contents: adjustmentPrompt });
-                currentText = response.text || '';
+                currentText = response.text ?? '';
             }
             setOriginalText(currentText);
         }
@@ -354,7 +353,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
         const prompt = `Füge dem folgenden Text eine korrekte Zeichensetzung und Groß-/Kleischreibung hinzu, um ihn lesbar zu machen. Ändere keine Wörter. Der Text ist ein Transkript einer gesprochenen Aufnahme.\n\nRoh-Transkript: "${rawTranscript}"\n\nGib nur den formatierten Text zurück.`;
         if (!ai) throw new Error("AI client not initialized");
         const response = await ai.models.generateContent({ model, contents: prompt });
-        const punctuatedTranscript = response.text || rawTranscript;
+        const punctuatedTranscript = response.text ?? rawTranscript;
         setUserTranscript(punctuatedTranscript);
     } catch (err) {
         console.error("Error processing transcript:", err);
@@ -364,6 +363,10 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
         setIsLoading(false);
     }
   }, [ai]);
+  
+  const handleTranscriptUpdate = (newTranscript: string) => {
+    setUserTranscript(newTranscript);
+  };
 
   const getFeedback = useCallback(async (textToCompare?: string) => {
       if (!userTranscript) {
@@ -438,7 +441,7 @@ Gib dein Feedback als JSON-Objekt.
             },
         });
         
-        const jsonStr = (response.text || '').trim();
+        const jsonStr = (response.text ?? '').trim();
         if (!jsonStr) {
             throw new Error("Leere Antwort von der Feedback-API erhalten.");
         }
@@ -491,6 +494,7 @@ Gib dein Feedback als JSON-Objekt.
                   onRecordingFinished={handleRecordingFinished}
                   getFeedback={getFeedback}
                   userTranscript={userTranscript}
+                  onTranscriptUpdate={handleTranscriptUpdate}
                   feedback={feedback}
                   error={error}
                   settings={settings}
@@ -850,12 +854,12 @@ const DialogueResults = ({ originalText, userTranscript, feedback, getFeedback, 
 
 const PracticeArea = ({
   isLoading, loadingMessage, originalText, onRecordingFinished, getFeedback,
-  userTranscript, feedback, error, settings, exerciseStarted,
+  userTranscript, onTranscriptUpdate, feedback, error, settings, exerciseStarted,
   onPremiumVoiceAuthError, onDialogueFinished,
 }: {
   isLoading: boolean; loadingMessage: string; originalText: string;
   onRecordingFinished: (transcript: string) => void; getFeedback: (textToCompare?: string) => void;
-  userTranscript: string; feedback: Feedback | null; error: string | null; settings: Settings;
+  userTranscript: string; onTranscriptUpdate: (newTranscript: string) => void; feedback: Feedback | null; error: string | null; settings: Settings;
   exerciseStarted: boolean; onPremiumVoiceAuthError: () => void;
   onDialogueFinished: (results: StructuredDialogueResult[]) => void;
 }) => {
@@ -864,6 +868,8 @@ const PracticeArea = ({
   const [isRecording, setIsRecording] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editableOriginalText, setEditableOriginalText] = useState(originalText);
+  const [isTranscriptEditing, setIsTranscriptEditing] = useState(false);
+  const [editableTranscript, setEditableTranscript] = useState(userTranscript);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
@@ -877,6 +883,10 @@ const PracticeArea = ({
   useEffect(() => {
     setEditableOriginalText(originalText);
   }, [originalText]);
+
+  useEffect(() => {
+    setEditableTranscript(userTranscript);
+  }, [userTranscript]);
 
   useEffect(() => {
     // Automatically switch to transcript tab when a new transcript is generated.
@@ -1007,7 +1017,7 @@ const PracticeArea = ({
   }, []);
 
   const getFeedbackForCurrentText = () => {
-    const textForFeedback = settings.mode === 'Stegreifübersetzen' ? editableOriginalText : originalText;
+    const textForFeedback = ['Stegreifübersetzen', 'Vortragsdolmetschen', 'Simultandolmetschen', 'Shadowing'].includes(settings.mode) ? editableOriginalText : originalText;
     getFeedback(textForFeedback);
   };
 
@@ -1240,10 +1250,29 @@ const PracticeArea = ({
         {activeTab === 'transcript' && (
           <>
             <div className="controls-bar">
-              <button onClick={getFeedbackForCurrentText} disabled={!userTranscript.trim() || isRecording}>Feedback erhalten</button>
+                <button onClick={getFeedbackForCurrentText} disabled={!userTranscript.trim() || isRecording}>Feedback erhalten</button>
+                {settings.mode === 'Stegreifübersetzen' && (
+                    <button onClick={() => {
+                        if (isTranscriptEditing) {
+                            onTranscriptUpdate(editableTranscript);
+                        }
+                        setIsTranscriptEditing(prev => !prev);
+                    }}>
+                        {isTranscriptEditing ? '✓ Speichern' : '✎ Bearbeiten'}
+                    </button>
+                )}
             </div>
              <div className="text-area">
-              <p>{userTranscript || "Noch kein Transkript vorhanden. Machen Sie eine Aufnahme."}</p>
+                {isTranscriptEditing && settings.mode === 'Stegreifübersetzen' ? (
+                    <textarea
+                      className="text-area-editor"
+                      value={editableTranscript}
+                      onChange={(e) => setEditableTranscript(e.target.value)}
+                      aria-label="Transkript bearbeiten"
+                    />
+                ) : (
+                    <p>{userTranscript || "Noch kein Transkript vorhanden. Machen Sie eine Aufnahme."}</p>
+                )}
             </div>
           </>
         )}
