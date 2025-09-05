@@ -29,8 +29,9 @@ function App() {
         contents: prompt,
       });
 
-      // FIX: Extract the text directly from the `response.text` property as per guidelines.
-      setResult(response.text);
+      // FIX: Extract the text directly from the `response.text` property as per guidelines,
+      // and provide a fallback to an empty string to satisfy TypeScript's strict null checks.
+      setResult(response.text ?? '');
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
       setError(`Failed to generate content: ${errorMessage}`);
