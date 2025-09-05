@@ -955,8 +955,12 @@ const TextDisplay = ({ text, settings, isSpeechMode, onPremiumVoiceAuthError }: 
                 <div className="controls-bar">
                     {isSpeechMode && (
                         <>
-                           <button onClick={handlePlayPause} disabled={!text}>
-                                {isPlaying ? 'Stopp' : 'Abspielen'}
+                           <button onClick={handlePlayPause} disabled={!text} className="btn-play-pause" aria-label={isPlaying ? "Pausieren" : "Abspielen"}>
+                                {isPlaying ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M0 0h24v24H0V0z" fill="none" /><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24" fill="currentColor"><path d="M0 0h24v24H0V0z" fill="none" /><path d="M8 5v14l11-7L8 5z" /></svg>
+                                )}
                             </button>
                             <label htmlFor="playbackRate">Geschwindigkeit: {playbackRate.toFixed(1)}x</label>
                             <input
@@ -980,18 +984,34 @@ const TextDisplay = ({ text, settings, isSpeechMode, onPremiumVoiceAuthError }: 
 };
 
 const TranscriptDisplay = ({ transcript, onTranscriptChange, onGetFeedback }: { transcript: string, onTranscriptChange: (newVal: string) => void, onGetFeedback: () => void }) => {
+    const [isEditing, setIsEditing] = useState(false);
+    
     return (
         <>
             <div className="text-area">
-                <textarea 
-                    className="form-control text-area-editor"
-                    value={transcript}
-                    onChange={(e) => onTranscriptChange(e.target.value)}
-                    placeholder="Ihr Transkript wird hier angezeigt..."
-                />
+                {isEditing ? (
+                    <textarea 
+                        className="form-control text-area-editor"
+                        value={transcript}
+                        onChange={(e) => onTranscriptChange(e.target.value)}
+                        placeholder="Ihr Transkript wird hier angezeigt..."
+                        autoFocus
+                    />
+                ) : (
+                    <p>{transcript || "Ihr Transkript wird hier angezeigt..."}</p>
+                )}
             </div>
             <div className="controls-bar" style={{marginTop: '1rem', justifyContent: 'flex-end'}}>
-                 <button className="btn btn-primary" onClick={onGetFeedback} disabled={!transcript}>
+                {isEditing ? (
+                     <button className="btn btn-secondary" onClick={() => setIsEditing(false)}>
+                        Fertig
+                     </button>
+                ) : (
+                     <button className="btn btn-secondary" onClick={() => setIsEditing(true)} disabled={!transcript}>
+                        Bearbeiten
+                     </button>
+                )}
+                <button className="btn btn-primary" onClick={onGetFeedback} disabled={!transcript || isEditing}>
                     Feedback anfordern
                 </button>
             </div>

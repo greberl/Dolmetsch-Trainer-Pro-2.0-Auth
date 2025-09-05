@@ -343,7 +343,7 @@ textarea.form-control {
     margin-bottom: 1rem;
 }
 
-.controls-bar button {
+.controls-bar button:not(.btn-play-pause) {
     padding: 0.5rem 1rem;
     background-color: #e9ecef;
     border: 1px solid var(--border-color);
@@ -351,10 +351,10 @@ textarea.form-control {
     cursor: pointer;
     transition: background-color var(--transition-speed);
 }
-.controls-bar button:hover:not(:disabled) {
+.controls-bar button:not(.btn-play-pause):hover:not(:disabled) {
     background-color: #dee2e6;
 }
-.controls-bar button:disabled {
+.controls-bar button:not(.btn-play-pause):disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }
@@ -631,4 +631,35 @@ textarea.form-control {
 
 .api-key-modal .btn {
     width: 100%;
+}
+
+.btn-play-pause {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all var(--transition-speed);
+    flex-shrink: 0;
+}
+
+.btn-play-pause:hover:not(:disabled) {
+    background-color: var(--primary-hover-color);
+    transform: scale(1.05);
+}
+
+.btn-play-pause:disabled {
+    background-color: var(--secondary-color);
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-play-pause svg {
+    width: 24px;
+    height: 24px;
 }
