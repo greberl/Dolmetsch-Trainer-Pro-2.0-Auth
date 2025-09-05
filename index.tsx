@@ -189,18 +189,20 @@ const synthesizeSpeechGoogleCloud = async (text: string, language: Language, api
         })
     });
 
+    // Fix: The response body can only be consumed once.
+    // Parse the JSON response here and use the resulting object for both error and success handling.
+    const data = await response.json();
+
     if (!response.ok) {
-        const errorData = await response.json();
-        console.error("Google TTS API Error:", JSON.stringify(errorData, null, 2));
-        const message = `Fehler bei der Sprachsynthese: ${errorData.error?.message || 'Unbekannter Fehler'}`;
+        console.error("Google TTS API Error:", JSON.stringify(data, null, 2));
+        const message = `Fehler bei der Sprachsynthese: ${data.error?.message || 'Unbekannter Fehler'}`;
         // Check for common API key-related errors to allow for graceful fallback.
-        if (response.status === 403 || response.status === 400 || errorData.error?.message?.toLowerCase().includes('api key not valid')) {
+        if (response.status === 403 || response.status === 400 || data.error?.message?.toLowerCase().includes('api key not valid')) {
              throw new TtsAuthError(message);
         }
         throw new Error(message);
     }
 
-    const data = await response.json();
     if (!data.audioContent) {
         throw new Error("Keine Audiodaten von der TTS-API erhalten.");
     }
@@ -291,8 +293,7 @@ Frage 3: Wie können einzelne Personen beitragen?
 Antwort 3: Individuals can contribute by reducing their carbon footprint, for instance, through less consumption and more recycling.
 `;
             const response = await ai.models.generateContent({ model, contents: prompt });
-            // FIX: Access the .text property on the response, not .text() method.
-            setOriginalText(response.text || '');
+            setOriginalText(response.text);
         } else {
             const isSpeechMode = ["Vortragsdolmetschen", "Simultandolmetschen", "Shadowing"].includes(currentSettings.mode);
             const { min, max } = isSpeechMode
@@ -310,8 +311,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
             
             setLoadingMessage('Generiere Text (Versuch 1)...');
             let response = await ai.models.generateContent({ model, contents: initialPrompt });
-            // FIX: Access the .text property on the response, not .text() method.
-            currentText = response.text || ''; 
+            currentText = response.text; 
 
             while ((currentText.length < min || currentText.length > max) && attempts < 4) {
                 attempts++;
@@ -326,8 +326,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
 
 
                 response = await ai.models.generateContent({ model, contents: adjustmentPrompt });
-                // FIX: Access the .text property on the response, not .text() method.
-                currentText = response.text || '';
+                currentText = response.text;
             }
             setOriginalText(currentText);
         }
@@ -370,7 +369,6 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
         const prompt = `Füge dem folgenden Text eine korrekte Zeichensetzung und Groß-/Kleischreibung hinzu, um ihn lesbar zu machen. Ändere keine Wörter. Der Text ist ein Transkript einer gesprochenen Aufnahme.\n\nRoh-Transkript: "${rawTranscript}"\n\nGib nur den formatierten Text zurück.`;
         if (!ai) throw new Error("AI client not initialized");
         const response = await ai.models.generateContent({ model, contents: prompt });
-        // FIX: Access the .text property on the response, not .text() method.
         const punctuatedTranscript = response.text || rawTranscript;
         setUserTranscript(punctuatedTranscript);
     } catch (err) {
@@ -463,8 +461,7 @@ Gib dein Feedback als JSON-Objekt.
             },
         });
         
-        // FIX: Access the .text property on the response, not .text() method.
-        const jsonStr = (response.text || '').trim();
+        const jsonStr = (response.text).trim();
         if (!jsonStr) {
             throw new Error("Leere Antwort von der Feedback-API erhalten.");
         }
@@ -1080,7 +1077,7 @@ const TranscriptDisplay = ({ transcript, onTranscriptChange, onGetFeedback }: { 
                         Bearbeiten
                      </button>
                 )}
-                <button className="btn btn-secondary" onClick={onGetFeedback} disabled={!transcript || isEditing}>
+                <button className="btn btn-primary" onClick={onGetFeedback} disabled={!transcript || isEditing}>
                     Feedback anfordern
                 </button>
             </div>
@@ -1320,6 +1317,11 @@ const DialoguePractice = ({
         }
     }, [dialogueState]);
 
+    const handleManualStop = () => {
+        if (recognitionRef.current && dialogueState === 'recording') {
+            recognitionRef.current.stop();
+        }
+    };
 
     const getStatusText = () => {
         switch (dialogueState) {
@@ -1376,10 +1378,11 @@ const DialoguePractice = ({
                         </button>
                     )}
                     {(dialogueState === 'playing' || dialogueState === 'recording') && (
-                        <button 
+                        <button
                             className="btn-record recording"
-                            aria-label="Aufnahme läuft"
-                            disabled
+                            aria-label={dialogueState === 'recording' ? "Aufnahme stoppen" : "Aufnahme läuft"}
+                            disabled={dialogueState !== 'recording'}
+                            onClick={handleManualStop}
                         >
                            <span className="mic-icon"></span>
                         </button>
