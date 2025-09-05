@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 // Fix: Import `Type` to be used for defining a response schema.
 import { GoogleGenAI, Type } from "@google/genai";
@@ -1199,7 +1199,12 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
       };
       
       rec.onend = () => {
-        handleNextSegment();
+        // handleNextSegment is called here in the original code, but it's better to control state explicitly.
+        // If the recording ends naturally, we might want to move to the next segment.
+        // If stop() was called manually, the state will already be changing.
+        if (dialogueState === 'recording') {
+            handleNextSegment();
+        }
       };
       
       rec.onerror = (event: SpeechRecognitionErrorEvent) => {
@@ -1208,11 +1213,6 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
       };
       
       rec.start();
-
-    // Fix: Removed redundant `dialogueState !== 'recording'` check, which is always true in the `else` branch.
-    } else if (recognition.current) {
-      recognition.current.stop();
-      recognition.current = null;
     }
 
     return () => {
@@ -1229,6 +1229,7 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
       if (recognition.current) {
         recognition.current.stop();
       }
+      // After stopping, onend will fire and call handleNextSegment
     } else if (dialogueState === 'waiting_for_record') {
       setCurrentTranscript('');
       setDialogueState('recording');
