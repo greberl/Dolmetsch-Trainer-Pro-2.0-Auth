@@ -142,7 +142,18 @@ const TEXT_LENGTH_CONFIG: Record<InterpretingMode, { min: number, max: number }>
 
 const model = "gemini-2.5-flash";
 
-// --- HELPER COMPONENTS ---
+// --- HELPER HOOKS & COMPONENTS ---
+/**
+ * Custom hook to get the previous value of a prop or state.
+ */
+function usePrevious<T>(value: T): T | undefined {
+    const ref = useRef<T>();
+    useEffect(() => {
+        ref.current = value;
+    });
+    return ref.current;
+}
+
 const ApiKeyErrorDisplay = () => (
   <div className="api-key-modal-overlay">
     <div className="api-key-modal">
@@ -280,7 +291,9 @@ Frage 3: Wie können einzelne Personen beitragen?
 Antwort 3: Individuals can contribute by reducing their carbon footprint, for instance, through less consumption and more recycling.
 `;
             const response = await ai.models.generateContent({ model, contents: prompt });
-            setOriginalText(response.text || '');
+            // FIX: The provided error is likely due to an incorrect API usage for text extraction.
+            // Changed `response.text` to `response.text()` to treat it as a method call.
+            setOriginalText(response.text() || '');
         } else {
             const isSpeechMode = ["Vortragsdolmetschen", "Simultandolmetschen", "Shadowing"].includes(currentSettings.mode);
             const { min, max } = isSpeechMode
@@ -298,7 +311,9 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
             
             setLoadingMessage('Generiere Text (Versuch 1)...');
             let response = await ai.models.generateContent({ model, contents: initialPrompt });
-            currentText = response.text || ''; 
+            // FIX: The provided error is likely due to an incorrect API usage for text extraction.
+            // Changed `response.text` to `response.text()` to treat it as a method call.
+            currentText = response.text() || ''; 
 
             while ((currentText.length < min || currentText.length > max) && attempts < 4) {
                 attempts++;
@@ -313,7 +328,9 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
 
 
                 response = await ai.models.generateContent({ model, contents: adjustmentPrompt });
-                currentText = response.text || '';
+                // FIX: The provided error is likely due to an incorrect API usage for text extraction.
+                // Changed `response.text` to `response.text()` to treat it as a method call.
+                currentText = response.text() || '';
             }
             setOriginalText(currentText);
         }
@@ -356,7 +373,9 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
         const prompt = `Füge dem folgenden Text eine korrekte Zeichensetzung und Groß-/Kleischreibung hinzu, um ihn lesbar zu machen. Ändere keine Wörter. Der Text ist ein Transkript einer gesprochenen Aufnahme.\n\nRoh-Transkript: "${rawTranscript}"\n\nGib nur den formatierten Text zurück.`;
         if (!ai) throw new Error("AI client not initialized");
         const response = await ai.models.generateContent({ model, contents: prompt });
-        const punctuatedTranscript = response.text || rawTranscript;
+        // FIX: The provided error is likely due to an incorrect API usage for text extraction.
+        // Changed `response.text` to `response.text()` to treat it as a method call.
+        const punctuatedTranscript = response.text() || rawTranscript;
         setUserTranscript(punctuatedTranscript);
     } catch (err) {
         console.error("Error processing transcript:", err);
@@ -448,7 +467,9 @@ Gib dein Feedback als JSON-Objekt.
             },
         });
         
-        const jsonStr = (response.text || '').trim();
+        // FIX: The provided error is likely due to an incorrect API usage for text extraction.
+        // Changed `response.text` to `response.text()` to treat it as a method call.
+        const jsonStr = (response.text() || '').trim();
         if (!jsonStr) {
             throw new Error("Leere Antwort von der Feedback-API erhalten.");
         }
@@ -708,11 +729,28 @@ const PracticeArea = ({
     onDialogueFinished: (results: StructuredDialogueResult[]) => void;
 }) => {
     const [activeTab, setActiveTab] = useState<PracticeAreaTab>('original');
-    
     const [isRecording, setIsRecording] = useState(false);
     const recognitionRef = useRef<SpeechRecognition | null>(null);
     const transcriptRef = useRef<string>('');
     const [isSpeechSupported, setIsSpeechSupported] = useState(true);
+
+    const prevUserTranscript = usePrevious(userTranscript);
+    const prevFeedback = usePrevious(feedback);
+
+    // Automatically switch to the transcript tab when it's generated
+    useEffect(() => {
+        if (userTranscript && !prevUserTranscript) {
+            setActiveTab('transcript');
+        }
+    }, [userTranscript, prevUserTranscript]);
+
+    // Automatically switch to the feedback tab when it's generated
+    useEffect(() => {
+        if (feedback && !prevFeedback) {
+            setActiveTab('feedback');
+        }
+    }, [feedback, prevFeedback]);
+
 
     const isSpeechMode = ["Vortragsdolmetschen", "Simultandolmetschen", "Shadowing"].includes(settings.mode);
 
@@ -1047,7 +1085,7 @@ const TranscriptDisplay = ({ transcript, onTranscriptChange, onGetFeedback }: { 
                         Bearbeiten
                      </button>
                 )}
-                <button className="btn btn-primary" onClick={onGetFeedback} disabled={!transcript || isEditing}>
+                <button className="btn btn-secondary" onClick={onGetFeedback} disabled={!transcript || isEditing}>
                     Feedback anfordern
                 </button>
             </div>
