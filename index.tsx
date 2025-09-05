@@ -1,5 +1,3 @@
-
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -461,9 +459,6 @@ Gib dein Feedback als JSON-Objekt.
   const handleDialogueFinished = (results: StructuredDialogueResult[]) => {
       setDialogueFinished(true);
       setStructuredDialogueResults(results);
-      // Fix: Combine and set the full transcript in the parent state when the dialogue finishes.
-      const fullTranscript = results.map(r => r.userInterpretation).join('\n\n');
-      setUserTranscript(fullTranscript);
   };
 
   return (
@@ -480,13 +475,13 @@ Gib dein Feedback als JSON-Objekt.
             isPremiumVoiceAvailable={isPremiumVoiceAvailable}
         />
          {settings.mode === 'Gesprächsdolmetschen' && dialogueFinished ? (
-              // Fix: Removed props `originalText`, `userTranscript`, and `loadingMessage`
-              // as they are not defined on the `DialogueResults` component. The necessary data
-              // is now derived from other state or props within the component.
               <DialogueResults
+                originalText={originalText}
+                userTranscript={userTranscript}
                 feedback={feedback}
                 getFeedback={getFeedback}
                 isLoading={isLoading}
+                loadingMessage={loadingMessage}
                 error={error}
                 structuredResults={structuredDialogueResults}
               />
@@ -723,7 +718,6 @@ const PracticeArea = ({
     const [isRecording, setIsRecording] = useState(false);
     const [recordingStatus, setRecordingStatus] = useState('Bereit zum Aufnehmen. Klicken Sie auf den Button.');
     const recognitionRef = useRef<SpeechRecognition | null>(null);
-    const manualStopRef = useRef(false); // Flag to distinguish manual stop from timeout
 
     // --- Audio Playback State ---
     const [isPlaying, setIsPlaying] = useState(false);
@@ -876,20 +870,8 @@ const PracticeArea = ({
         };
         
         recognition.onend = () => {
-            if (manualStopRef.current) {
-                // Manual stop by user, proceed to finish the recording.
-                setIsRecording(false);
-                onRecordingFinished(transcript);
-            } else {
-                // Automatic stop (timeout), restart the recognition to continue listening.
-                try {
-                    recognitionRef.current?.start();
-                } catch (e) {
-                    console.error("Failed to restart speech recognition:", e);
-                    // If restart fails, then we must stop.
-                    setIsRecording(false);
-                }
-            }
+            setIsRecording(false);
+            onRecordingFinished(transcript);
         };
 
         return () => {
@@ -901,13 +883,11 @@ const PracticeArea = ({
         if (!recognitionRef.current) return;
 
         if (!isRecording) {
-            manualStopRef.current = false; // Reset flag on start
             setTranscript('');
             recognitionRef.current.start();
             setRecordingStatus('Aufnahme läuft... Klicken Sie zum Stoppen.');
             setIsRecording(true);
         } else {
-            manualStopRef.current = true; // Set flag on manual stop
             recognitionRef.current.stop();
         }
     };
@@ -1210,16 +1190,22 @@ const ErrorAnalysisList = ({ items }: { items: ErrorAnalysisItem[] }) => {
 };
 
 const DialogueResults = ({
+  originalText,
+  userTranscript,
   structuredResults,
   getFeedback,
   feedback,
   isLoading,
+  loadingMessage,
   error,
 }: {
+  originalText: string;
+  userTranscript: string;
   structuredResults: StructuredDialogueResult[] | null;
   getFeedback: (textToCompare?: string) => void;
   feedback: Feedback | null;
   isLoading: boolean;
+  loadingMessage: string;
   error: string | null;
 }) => {
     
@@ -1235,6 +1221,7 @@ const DialogueResults = ({
              {isLoading && (
                 <div className="loading-overlay">
                     <div className="spinner"></div>
+                    <p>{loadingMessage}</p>
                 </div>
             )}
             <div className="tabs">
