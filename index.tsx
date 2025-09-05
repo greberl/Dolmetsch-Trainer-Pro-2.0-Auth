@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 // --- WEB SPEECH API TYPES ---
 interface SpeechRecognitionAlternative {
@@ -210,7 +210,7 @@ const App = () => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const result = e.target?.result;
-      if (typeof result === 'string') {
+      if (result && typeof result === 'string') {
         setOriginalText(result);
         setExerciseState('ready');
         setExerciseId(Date.now());
@@ -664,6 +664,8 @@ const DialoguePractice = ({ settings, dialogue }: {
     
     // Speech Recognition Setup
     useEffect(() => {
+        if (!currentSegment) return; // Guard against running when dialogue is finished
+
         const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognitionAPI) {
             console.warn("Speech Recognition not supported.");
@@ -698,13 +700,13 @@ const DialoguePractice = ({ settings, dialogue }: {
         recognition.current = rec;
 
         return () => {
-            rec.onresult = null;
-            rec.onend = null;
-            rec.onerror = null;
+            rec.onresult = () => {};
+            rec.onend = () => {};
+            rec.onerror = () => {};
             rec.stop();
         };
 
-    }, [targetLang, dialogueState]);
+    }, [targetLang, dialogueState, currentSegment]);
 
     // Main state machine for dialogue flow
     useEffect(() => {
@@ -741,6 +743,7 @@ const DialoguePractice = ({ settings, dialogue }: {
     };
     
     const handleNextSegment = () => {
+        if (!currentSegment) return;
          setDialogueResults(prev => [...prev, {
             originalSegment: currentSegment,
             userInterpretation: currentTranscript,
@@ -750,6 +753,7 @@ const DialoguePractice = ({ settings, dialogue }: {
         const nextIndex = segmentIndex + 1;
         if (nextIndex < dialogue.length) {
             setSegmentIndex(nextIndex);
+            setDialogueState('synthesizing'); // Explicitly set state for next segment
             synthesizeAndPlayCurrentSegment();
         } else {
             setDialogueState('finished');
@@ -841,6 +845,8 @@ const SightTranslationPractice = ({ settings, dialogue }: {
     
     // Speech Recognition Setup
     useEffect(() => {
+        if (!currentSegment) return; // Guard against running when dialogue is finished
+
         const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognitionAPI) {
             console.warn("Speech Recognition not supported.");
@@ -870,7 +876,7 @@ const SightTranslationPractice = ({ settings, dialogue }: {
             setIsRecording(false);
         };
         rec.onend = () => {
-             if (isRecording) { // If it stops unexpectedly, restart it
+             if (isRecordingRef.current) { // If it stops unexpectedly, restart it
                 rec.start();
              }
         };
@@ -878,16 +884,16 @@ const SightTranslationPractice = ({ settings, dialogue }: {
         recognition.current = rec;
         
         return () => {
-            rec.onresult = null;
-            rec.onend = null;
-            rec.onerror = null;
+            rec.onresult = () => {};
+            rec.onend = () => {};
+            rec.onerror = () => {};
             if (rec) {
                 isRecordingRef.current = false; // Prevent restart on manual stop
                 rec.stop();
             }
         };
 
-    }, [targetLang]);
+    }, [targetLang, currentSegment]);
     
     // useRef to get the latest isRecording state in the onend callback
     const isRecordingRef = useRef(isRecording);
@@ -901,6 +907,7 @@ const SightTranslationPractice = ({ settings, dialogue }: {
             handleRecordClick();
         }
         
+        if (!currentSegment) return;
          setDialogueResults(prev => [...prev, {
             originalSegment: currentSegment,
             userInterpretation: currentTranscript,
