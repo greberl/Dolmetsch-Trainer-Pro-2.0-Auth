@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -286,7 +287,7 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
                 : TEXT_LENGTH_CONFIG[currentSettings.mode];
 
             const promptText = currentSettings.mode === 'Stegreifübersetzen'
-                ? `Schreibe einen sachlichen Text auf ${currentSettings.sourceLang} zum Thema "${currentSettings.topic}". Der Text soll für eine Stegreifübersetzungsübung geeignet sein und keine direkte Rede oder Anrede (wie "Sehr geehrte Damen und Herren") enthalten.`
+                ? `Erstelle einen sachlichen Text zum Thema "${currentSettings.topic}". WICHTIG: Der Text muss vollständig in ${currentSettings.sourceLang} verfasst sein. Der Text ist für eine Stegreifübersetzungsübung und sollte keine direkte Anrede (wie "Sehr geehrte Damen und Herren") oder Dialoge enthalten.`
                 : `Schreibe einen Vortragstext auf ${currentSettings.sourceLang} zum Thema "${currentSettings.topic}". Der Text soll für eine Dolmetschübung geeignet sein.`;
 
             const initialPrompt = `${promptText} Die Ziellänge beträgt zwischen ${min} und ${max} Zeichen inklusive Leerzeichen. Gib nur den reinen Text ohne Titel oder Formatierung zurück.`;
@@ -1179,12 +1180,14 @@ const PracticeArea = ({
       <div className="tab-content">
         {activeTab === 'original' && (
           <>
-            <div className="controls-bar">
-              <button onClick={() => playText(originalText, settings.sourceLang)} disabled={isPlaying || isRecording}>
-                {isPlaying ? 'Spielt...' : '▶ Abspielen'}
-              </button>
-              <button onClick={stopPlayback} disabled={!isPlaying}>■ Stopp</button>
-            </div>
+            {settings.mode !== 'Stegreifübersetzen' && (
+              <div className="controls-bar">
+                <button onClick={() => playText(originalText, settings.sourceLang)} disabled={isPlaying || isRecording}>
+                  {isPlaying ? 'Spielt...' : '▶ Abspielen'}
+                </button>
+                <button onClick={stopPlayback} disabled={!isPlaying}>■ Stopp</button>
+              </div>
+            )}
             <div className="text-area">
               <p>{originalText}</p>
             </div>
