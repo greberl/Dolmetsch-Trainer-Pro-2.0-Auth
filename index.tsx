@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 // Fix: Import `Type` to be used for defining a response schema.
@@ -762,9 +763,11 @@ const DialoguePractice = ({ settings, dialogue }: {
             }
         };
 
+        // Fix: Changed 'else if' to 'else' to remove a redundant condition that caused a TypeScript error.
+        // The type of `dialogueState` is already narrowed in the `else` branch, making the check unnecessary.
         if (dialogueState === 'recording') {
             rec.start();
-        } else if (dialogueState !== 'recording') {
+        } else {
             rec.stop();
         }
 
