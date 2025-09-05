@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { GoogleGenAI } from "@google/genai";
+// Fix: Import `Type` to be used for defining a response schema.
+import { GoogleGenAI, Type } from "@google/genai";
 
 // --- WEB SPEECH API TYPES ---
 // Fix for TS2304, TS2339: Provide types for the browser's SpeechRecognition API.
@@ -52,7 +53,7 @@ type SourceTextType = "ai" | "upload";
 type QALength = "1-3 Sätze" | "2-4 Sätze" | "3-5 Sätze" | "4-6 Sätze";
 type SpeechLength = "Kurz" | "Mittel" | "Prüfung";
 type VoiceQuality = "Standard" | "Premium";
-type DialogueState = 'idle' | 'synthesizing' | 'playing' | 'waiting_for_record' | 'recording' | 'processing' | 'finished';
+type DialogueState = 'synthesizing' | 'playing' | 'waiting_for_record' | 'recording' | 'finished';
 type PracticeAreaTab = 'original' | 'transcript' | 'feedback';
 
 
@@ -189,21 +190,8 @@ const synthesizeSpeechGoogleCloud = async (text: string, language: Language, api
         })
     });
 
-    // Fix: The response body can only be consumed once, so we read it as text first.
-    // This provides more robust error handling than calling response.json() directly.
-    const responseBody = await response.text();
-
     if (!response.ok) {
-        let errorData;
-        try {
-            // Attempt to parse the error response as JSON
-            errorData = JSON.parse(responseBody);
-        } catch (e) {
-            // If parsing fails, the body was not JSON. Use the raw text for the error.
-            console.error("Google TTS API Error (non-JSON response):", responseBody);
-            throw new Error(`Fehler bei der Sprachsynthese: ${responseBody}`);
-        }
-        
+        const errorData = await response.json();
         console.error("Google TTS API Error:", JSON.stringify(errorData, null, 2));
         const message = `Fehler bei der Sprachsynthese: ${errorData.error?.message || 'Unbekannter Fehler'}`;
         
@@ -213,7 +201,7 @@ const synthesizeSpeechGoogleCloud = async (text: string, language: Language, api
         throw new Error(message);
     }
 
-    const data = JSON.parse(responseBody);
+    const data = await response.json();
 
     if (!data.audioContent) {
         throw new Error("Keine Audiodaten von der TTS-API erhalten.");
@@ -260,7 +248,7 @@ const App = () => {
   const [exerciseStarted, setExerciseStarted] = useState(false);
   const [dialogueFinished, setDialogueFinished] = useState(false);
   const [structuredDialogueResults, setStructuredDialogueResults] = useState<StructuredDialogueResult[] | null>(null);
-  const [exerciseId, setExerciseId] = useState(() => Date.now());
+  const [exerciseId, setExerciseId] = useState(Date.now());
   
   if (!ai) {
     return <ApiKeyErrorDisplay />;
@@ -268,6 +256,7 @@ const App = () => {
 
   const handlePremiumVoiceAuthError = () => {
     setIsPremiumVoiceAvailable(false);
+    setSettings(prev => ({ ...prev, voiceQuality: 'Standard' }));
   };
 
   const generateText = async (currentSettings: Settings) => {
@@ -447,11 +436,43 @@ Stelle sicher, dass die Antwort ausschließlich im folgenden JSON-Format erfolgt
 }
 `;
       }
+      // Fix: Implement responseSchema for robust JSON handling as per guidelines.
+      const schema = {
+        type: Type.OBJECT,
+        properties: {
+          summary: { type: Type.STRING },
+          ratings: {
+            type: Type.OBJECT,
+            properties: {
+              content: { type: Type.INTEGER },
+              expression: { type: Type.INTEGER },
+              terminology: { type: Type.INTEGER },
+            },
+            required: ["content", "expression", "terminology"],
+          },
+          errorAnalysis: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                original: { type: Type.STRING },
+                interpretation: { type: Type.STRING },
+                suggestion: { type: Type.STRING },
+              },
+              required: ["original", "interpretation", "suggestion"],
+            },
+          },
+        },
+        required: ["summary", "ratings", "errorAnalysis"],
+      };
 
       const response = await ai.models.generateContent({
         model,
         contents: prompt,
-        config: { responseMimeType: "application/json" }
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: schema,
+        },
       });
       
       const parsedFeedback = JSON.parse(response.text || '{}');
@@ -947,7 +968,7 @@ const SpeechPlayer = ({ text, lang, mode, isPremiumVoiceAvailable, onAuthError }
             } else {
                 setIsLoading(true);
                 try {
-                    const audioContent = await synthesizeSpeechGoogleCloud(text, lang, process.env.API_KEY);
+                    const audioContent = await synthesizeSpeechGoogleCloud(text, lang, process.env.API_KEY!);
                     const audioBlob = new Blob([Uint8Array.from(atob(audioContent), c => c.charCodeAt(0))], { type: 'audio/mpeg' });
                     const audioUrl = URL.createObjectURL(audioBlob);
                     audioRef.current = new Audio(audioUrl);
@@ -1041,7 +1062,7 @@ interface DialoguePracticeProps {
 const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, isPremiumVoiceAvailable, onAuthError }: DialoguePracticeProps) => {
   const [segments, setSegments] = useState<DialogueSegment[]>([]);
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
-  const [dialogueState, setDialogueState] = useState<DialogueState>('idle');
+  const [dialogueState, setDialogueState] = useState<DialogueState>('synthesizing');
   const [results, setResults] = useState<StructuredDialogueResult[]>([]);
   const [currentTranscript, setCurrentTranscript] = useState('');
   const [isCurrentTextVisible, setIsCurrentTextVisible] = useState(false);
@@ -1077,7 +1098,7 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
                 let audioSrc = '';
                 if (settings.voiceQuality === 'Premium' && isPremiumVoiceAvailable) {
                     try {
-                        const audioContent = await synthesizeSpeechGoogleCloud(segment.text, segment.lang, process.env.API_KEY);
+                        const audioContent = await synthesizeSpeechGoogleCloud(segment.text, segment.lang, process.env.API_KEY!);
                         const audioBlob = new Blob([Uint8Array.from(atob(audioContent), c => c.charCodeAt(0))], { type: 'audio/mpeg' });
                         audioSrc = URL.createObjectURL(audioBlob);
                     } catch (err) {
@@ -1124,7 +1145,7 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
     };
 }, [dialogueState, currentSegmentIndex, segments, isPremiumVoiceAvailable, onAuthError, settings.voiceQuality, settings.sourceLang, settings.targetLang]);
 
-  const handleNextSegment = useCallback(() => {
+  const handleNextSegment = () => {
     const interpretationLang = segments[currentSegmentIndex].type === 'Frage' ? settings.targetLang : settings.sourceLang;
     const newResult: StructuredDialogueResult = {
         originalSegment: segments[currentSegmentIndex],
@@ -1138,32 +1159,24 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
     setIsCurrentTextVisible(false);
 
     if (currentSegmentIndex < segments.length - 1) {
-        setCurrentSegmentIndex(prevIndex => prevIndex + 1);
+        setCurrentSegmentIndex(currentSegmentIndex + 1);
         setDialogueState('synthesizing');
     } else {
         setDialogueState('finished');
         onFinish(updatedResults);
     }
-  }, [currentSegmentIndex, segments, onFinish, results, onUpdateResults, currentTranscript, settings.targetLang, settings.sourceLang]);
-  
-  // This effect triggers the processing of results after a recording has finished.
+  };
+
+
   useEffect(() => {
-    if (dialogueState === 'processing') {
-      handleNextSegment();
-    }
-  }, [dialogueState, handleNextSegment]);
-
-
-  // This effect manages the lifecycle of the SpeechRecognition object.
-  useEffect(() => {
-    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognitionAPI) {
-      setDialogueState('finished');
-      console.error("Speech Recognition not supported in this browser.");
-      return;
-    }
-
     if (dialogueState === 'recording') {
+      const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognitionAPI) {
+        setDialogueState('finished');
+        console.error("Speech Recognition not supported in this browser.");
+        return;
+      }
+      
       recognition.current = new SpeechRecognitionAPI();
       const rec = recognition.current;
       const interpretationLang = segments[currentSegmentIndex].type === 'Frage' ? settings.targetLang : settings.sourceLang;
@@ -1185,14 +1198,21 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
         setCurrentTranscript(finalTranscriptForSegment + interimTranscript);
       };
       
-      rec.onend = () => setDialogueState('processing');
+      rec.onend = () => {
+        handleNextSegment();
+      };
       
       rec.onerror = (event: SpeechRecognitionErrorEvent) => {
         console.error('Speech recognition error', event.error);
-        setDialogueState('processing');
+        handleNextSegment();
       };
       
       rec.start();
+
+    // Fix: Removed redundant `dialogueState !== 'recording'` check, which is always true in the `else` branch.
+    } else if (recognition.current) {
+      recognition.current.stop();
+      recognition.current = null;
     }
 
     return () => {
@@ -1201,14 +1221,14 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
         recognition.current = null;
       }
     };
-  }, [dialogueState, settings.targetLang, settings.sourceLang, segments, currentSegmentIndex]);
+  }, [dialogueState]);
 
 
   const handleRecordClick = () => {
     if (dialogueState === 'recording') {
-        if(recognition.current) {
-            recognition.current.stop();
-        }
+      if (recognition.current) {
+        recognition.current.stop();
+      }
     } else if (dialogueState === 'waiting_for_record') {
       setCurrentTranscript('');
       setDialogueState('recording');
@@ -1217,8 +1237,6 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
   
   const getStatusText = () => {
     switch(dialogueState) {
-        case 'idle':
-            return "Übung wird geladen...";
         case 'synthesizing':
             return "Audio wird vorbereitet...";
         case 'playing':
@@ -1227,8 +1245,6 @@ const DialoguePractice = ({ originalText, settings, onFinish, onUpdateResults, i
             return "Sie sind dran. Drücken Sie den Aufnahme-Button.";
         case 'recording':
             return "Ihre Verdolmetschung wird aufgenommen...";
-        case 'processing':
-            return "Aufnahme wird verarbeitet...";
         case 'finished':
             return "Gespräch beendet.";
         default:
