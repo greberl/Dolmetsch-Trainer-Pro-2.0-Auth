@@ -364,6 +364,10 @@ Antwort 3: Individuals can contribute by reducing their carbon footprint, for in
         setIsLoading(false);
     }
   }, [ai]);
+  
+  const handleTranscriptChange = (newTranscript: string) => {
+    setUserTranscript(newTranscript);
+  };
 
   const getFeedback = useCallback(async (textToCompare?: string) => {
       if (!userTranscript) {
@@ -489,6 +493,7 @@ Gib dein Feedback als JSON-Objekt.
                   loadingMessage={loadingMessage}
                   originalText={originalText}
                   onRecordingFinished={handleRecordingFinished}
+                  onTranscriptChange={handleTranscriptChange}
                   getFeedback={getFeedback}
                   userTranscript={userTranscript}
                   feedback={feedback}
@@ -849,12 +854,14 @@ const DialogueResults = ({ originalText, userTranscript, feedback, getFeedback, 
 
 
 const PracticeArea = ({
-  isLoading, loadingMessage, originalText, onRecordingFinished, getFeedback,
+  isLoading, loadingMessage, originalText, onRecordingFinished, onTranscriptChange, getFeedback,
   userTranscript, feedback, error, settings, exerciseStarted,
   onPremiumVoiceAuthError, onDialogueFinished,
 }: {
   isLoading: boolean; loadingMessage: string; originalText: string;
-  onRecordingFinished: (transcript: string) => void; getFeedback: (textToCompare?: string) => void;
+  onRecordingFinished: (transcript: string) => void;
+  onTranscriptChange: (newTranscript: string) => void;
+  getFeedback: (textToCompare?: string) => void;
   userTranscript: string; feedback: Feedback | null; error: string | null; settings: Settings;
   exerciseStarted: boolean; onPremiumVoiceAuthError: () => void;
   onDialogueFinished: (results: StructuredDialogueResult[]) => void;
@@ -864,6 +871,8 @@ const PracticeArea = ({
   const [isRecording, setIsRecording] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editableOriginalText, setEditableOriginalText] = useState(originalText);
+  const [isEditingTranscript, setIsEditingTranscript] = useState(false);
+  const [editableUserTranscript, setEditableUserTranscript] = useState(userTranscript);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
@@ -877,6 +886,10 @@ const PracticeArea = ({
   useEffect(() => {
     setEditableOriginalText(originalText);
   }, [originalText]);
+
+  useEffect(() => {
+      setEditableUserTranscript(userTranscript);
+  }, [userTranscript]);
 
   useEffect(() => {
     // Automatically switch to transcript tab when a new transcript is generated.
@@ -1010,6 +1023,13 @@ const PracticeArea = ({
     const textForFeedback = settings.mode === 'Stegreifübersetzen' ? editableOriginalText : originalText;
     getFeedback(textForFeedback);
   };
+  
+  const handleTranscriptEditToggle = () => {
+      if(isEditingTranscript) {
+          onTranscriptChange(editableUserTranscript);
+      }
+      setIsEditingTranscript(prev => !prev);
+  }
 
   // --- Effect and Logic for Dialogue Interpreting ---
   useEffect(() => {
@@ -1240,10 +1260,24 @@ const PracticeArea = ({
         {activeTab === 'transcript' && (
           <>
             <div className="controls-bar">
-              <button onClick={getFeedbackForCurrentText} disabled={!userTranscript.trim() || isRecording}>Feedback erhalten</button>
+               {settings.mode === 'Stegreifübersetzen' && userTranscript && (
+                  <button onClick={handleTranscriptEditToggle} disabled={isRecording}>
+                    {isEditingTranscript ? '✓ Speichern' : '✎ Bearbeiten'}
+                  </button>
+                )}
+              <button onClick={getFeedbackForCurrentText} disabled={!userTranscript.trim() || isRecording || isEditingTranscript}>Feedback erhalten</button>
             </div>
              <div className="text-area">
-              <p>{userTranscript || "Noch kein Transkript vorhanden. Machen Sie eine Aufnahme."}</p>
+                {isEditingTranscript ? (
+                    <textarea
+                        className="text-area-editor"
+                        value={editableUserTranscript}
+                        onChange={(e) => setEditableUserTranscript(e.target.value)}
+                        aria-label="Transkript bearbeiten"
+                    />
+                ) : (
+                    <p>{userTranscript || "Noch kein Transkript vorhanden. Machen Sie eine Aufnahme."}</p>
+                )}
             </div>
           </>
         )}
