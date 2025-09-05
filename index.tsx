@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 // Fix: Import `Type` to be used for defining a response schema.
@@ -213,10 +212,16 @@ const App = () => {
   const handleFileUpload = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const text = e.target?.result as string;
-      setOriginalText(text);
-      setExerciseState('ready');
-      setExerciseId(Date.now()); // Reset exercise with new ID
+      const result = e.target?.result;
+      if (typeof result === 'string') {
+        setOriginalText(result);
+        setExerciseState('ready');
+        setExerciseId(Date.now()); // Reset exercise with new ID
+      } else {
+        console.error("Failed to read file as text.");
+        setErrorMessage("Datei konnte nicht als Text gelesen werden.");
+        setExerciseState('error');
+      }
     };
     reader.readAsText(file);
   };
@@ -691,6 +696,8 @@ const DialoguePractice = ({ settings, dialogue }: {
     const isStegreif = settings.mode === 'Stegreifübersetzen';
 
     useEffect(() => {
+        if (!currentSegment) return; // Guard against undefined segment
+
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (SpeechRecognition) {
             const rec = new SpeechRecognition();
@@ -699,7 +706,7 @@ const DialoguePractice = ({ settings, dialogue }: {
             rec.lang = LANG_MAP[currentSegment.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang];
             recognition.current = rec;
         }
-    }, [currentSegmentIndex]); // Re-init when language might change
+    }, [currentSegment]); // Re-init when segment changes
 
     const handleNextSegment = () => {
         setShowText(false);
@@ -737,7 +744,7 @@ const DialoguePractice = ({ settings, dialogue }: {
             synthesizeAndPlay();
         }
 
-    }, [currentSegmentIndex, dialogueState]); // Effect runs when segment or state changes
+    }, [currentSegment, dialogueState]); // Effect runs when segment or state changes
 
     useEffect(() => {
         const rec = recognition.current;
@@ -762,9 +769,7 @@ const DialoguePractice = ({ settings, dialogue }: {
                 handleNextSegment();
             }
         };
-
-        // Fix: Changed 'else if' to 'else' to remove a redundant condition that caused a TypeScript error.
-        // The type of `dialogueState` is already narrowed in the `else` branch, making the check unnecessary.
+        
         if (dialogueState === 'recording') {
             rec.start();
         } else {
@@ -772,9 +777,9 @@ const DialoguePractice = ({ settings, dialogue }: {
         }
 
         return () => { // Cleanup
-            rec.onresult = null;
-            rec.onend = null;
-            rec.onerror = null;
+            rec.onresult = () => {};
+            rec.onend = () => {};
+            rec.onerror = () => {};
             if (dialogueState !== 'recording') {
                  rec.stop();
             }
@@ -794,6 +799,7 @@ const DialoguePractice = ({ settings, dialogue }: {
     };
 
     const getStatusText = () => {
+        if (!currentSegment) return 'Übung wird geladen...';
         switch (dialogueState) {
             case 'synthesizing':
                 return `Segment ${currentSegmentIndex + 1}/${dialogue.length}: Audio wird vorbereitet...`;
@@ -815,6 +821,16 @@ const DialoguePractice = ({ settings, dialogue }: {
             interpretationLang: segment.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang
         }));
         return <DialogueResults results={results} settings={settings} />;
+    }
+
+    if (!currentSegment) {
+        return (
+            <div className="panel practice-area">
+                <div className="placeholder">
+                    <h2>Dialog wird vorbereitet...</h2>
+                </div>
+            </div>
+        );
     }
 
     return (
