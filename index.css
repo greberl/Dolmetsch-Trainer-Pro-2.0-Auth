@@ -1,4 +1,5 @@
 
+
 :root {
   --primary-color: #007bff;
   --primary-hover-color: #0056b3;
@@ -584,12 +585,16 @@ textarea.form-control {
 }
 .transcript-segment-header {
     margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 .transcript-segment-header h4 {
     font-size: 1rem;
     font-weight: 600;
     color: var(--text-color);
     margin-bottom: 0;
+    margin-right: auto;
 }
 .transcript-segment-original,
 .transcript-segment-user {
@@ -602,7 +607,18 @@ textarea.form-control {
     border-radius: 0 var(--border-radius) var(--border-radius) 0;
     border-left: 3px solid var(--primary-color);
     margin-top: 0.5rem;
-    white-space: pre-wrap;
+}
+
+.transcript-segment-user strong {
+    display: block;
+    margin-bottom: 0.25rem;
+}
+
+.transcript-segment-user textarea.is-editing {
+    background-color: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 0.5rem;
 }
 
 .transcript-segment-user em {

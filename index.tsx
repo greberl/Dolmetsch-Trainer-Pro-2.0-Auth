@@ -561,6 +561,7 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognition = useRef<SpeechRecognition | null>(null);
   const [isEditingOriginalText, setIsEditingOriginalText] = useState(false);
+  const [isEditingTranscript, setIsEditingTranscript] = useState(false);
 
   const targetLang = mode === 'shadowing' ? settings.sourceLang : settings.targetLang;
 
@@ -652,8 +653,12 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
     }
   };
   
-  const handleEditToggle = () => {
+  const handleEditOriginalTextToggle = () => {
     setIsEditingOriginalText(prev => !prev);
+  };
+
+  const handleEditTranscriptToggle = () => {
+    setIsEditingTranscript(prev => !prev);
   };
   
   const getFeedback = async () => {
@@ -735,7 +740,7 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
                  <p>Originaltext anhören</p>
                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '1rem' }}>
                     <span className="char-counter">{originalText.length} Zeichen</span>
-                    <button className="btn btn-secondary" onClick={handleEditToggle}>
+                    <button className="btn btn-secondary" onClick={handleEditOriginalTextToggle}>
                         {isEditingOriginalText ? 'Speichern' : 'Bearbeiten'}
                     </button>
                  </div>
@@ -764,9 +769,25 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
                     <p>Transkript wird erstellt...</p>
                  </div>
             ) : (
-                 <div className="text-area">
-                    <textarea className="text-area-editor" value={displayTranscript ?? ''} onChange={(e) => setDisplayTranscript(e.target.value)} placeholder="Hier erscheint Ihre Verdolmetschung nach der Aufnahme..." />
-                 </div>
+                 <>
+                    <div className="controls-bar">
+                        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                            <span className="char-counter">{(displayTranscript ?? '').length} Zeichen</span>
+                            <button className="btn btn-secondary" onClick={handleEditTranscriptToggle}>
+                                {isEditingTranscript ? 'Speichern' : 'Bearbeiten'}
+                            </button>
+                        </div>
+                    </div>
+                    <div className="text-area">
+                       <textarea 
+                            className={`text-area-editor ${isEditingTranscript ? 'is-editing' : ''}`}
+                            value={displayTranscript ?? ''} 
+                            onChange={(e) => setDisplayTranscript(e.target.value)} 
+                            readOnly={!isEditingTranscript}
+                            placeholder="Hier erscheint Ihre Verdolmetschung nach der Aufnahme..." 
+                        />
+                    </div>
+                 </>
             )
         )}
         {activeTab === 'feedback' && (
@@ -861,6 +882,14 @@ const DialoguePractice = ({ settings, dialogue }: {
         }
     }, [activeTab, dialogueResults, processedResults]);
 
+    const handleUpdateResult = (index: number, newText: string) => {
+        setProcessedResults(prev => {
+            if (!prev) return null;
+            const updated = [...prev];
+            updated[index] = { ...updated[index], userInterpretation: newText };
+            return updated;
+        });
+    };
 
     const synthesizeAndPlayCurrentSegment = async () => {
         if (!currentSegment) return;
@@ -933,7 +962,7 @@ const DialoguePractice = ({ settings, dialogue }: {
                             <p>Ergebnisse werden aufbereitet...</p>
                         </div>
                     ) : (
-                        <StructuredTranscript results={processedResults || []} />
+                        <StructuredTranscript results={processedResults || []} onUpdateResult={handleUpdateResult} />
                     )}
                 </div>
             </div>
@@ -1043,6 +1072,15 @@ const SightTranslationPractice = ({ settings, dialogue }: {
         }
     }, [activeTab, dialogueResults, processedResults]);
 
+    const handleUpdateResult = (index: number, newText: string) => {
+        setProcessedResults(prev => {
+            if (!prev) return null;
+            const updated = [...prev];
+            updated[index] = { ...updated[index], userInterpretation: newText };
+            return updated;
+        });
+    };
+
     const handleNextSegment = () => {
         if (isRecording) { handleRecordClick(); }
         if (!currentSegment) return;
@@ -1086,7 +1124,7 @@ const SightTranslationPractice = ({ settings, dialogue }: {
                         <p>Ergebnisse werden aufbereitet...</p>
                     </div>
                 ) : (
-                    <StructuredTranscript results={processedResults || dialogueResults} />
+                    <StructuredTranscript results={processedResults || dialogueResults} onUpdateResult={handleUpdateResult} />
                 )}
             </div>
         </div>
@@ -1208,10 +1246,31 @@ const FeedbackDisplay = ({ feedback, isLoading, onGenerate, transcriptProvided }
   );
 };
 
-const StructuredTranscript = ({ results }: { results: StructuredDialogueResult[] }) => {
+const StructuredTranscript = ({ results, onUpdateResult }: { results: StructuredDialogueResult[]; onUpdateResult: (index: number, newText: string) => void; }) => {
+    const [editingState, setEditingState] = useState<{ index: number | null; text: string }>({ index: null, text: '' });
+
     if (results.length === 0) {
         return <p>Noch keine Ergebnisse vorhanden.</p>;
     }
+
+    const handleEdit = (index: number, currentText: string) => {
+        setEditingState({ index, text: currentText });
+    };
+
+    const handleSave = () => {
+        if (editingState.index !== null) {
+            onUpdateResult(editingState.index, editingState.text);
+            setEditingState({ index: null, text: '' });
+        }
+    };
+
+    const handleCancel = () => {
+        setEditingState({ index: null, text: '' });
+    };
+
+    const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        setEditingState(prev => ({ ...prev, text: e.target.value }));
+    };
 
     return (
         <div className="structured-transcript text-area">
@@ -1219,12 +1278,35 @@ const StructuredTranscript = ({ results }: { results: StructuredDialogueResult[]
                 <div key={index} className="transcript-segment">
                      <div className="transcript-segment-header">
                         <h4>Segment {index + 1}: {result.originalSegment.type} ({result.originalSegment.lang})</h4>
+                        {editingState.index === index ? (
+                            <>
+                                <span className="char-counter">{editingState.text.length} Zeichen</span>
+                                <button className="btn btn-secondary" onClick={handleSave} style={{padding: '0.25rem 0.5rem', fontSize: '0.8rem'}}>Speichern</button>
+                                <button className="btn btn-secondary" onClick={handleCancel} style={{padding: '0.25rem 0.5rem', fontSize: '0.8rem'}}>Abbrechen</button>
+                            </>
+                        ) : (
+                            <>
+                                <span className="char-counter">{(result.userInterpretation || '').length} Zeichen</span>
+                                <button className="btn btn-secondary" onClick={() => handleEdit(index, result.userInterpretation)} style={{padding: '0.25rem 0.5rem', fontSize: '0.8rem'}}>Bearbeiten</button>
+                            </>
+                        )}
                     </div>
                     <p className="transcript-segment-original">{result.originalSegment.text}</p>
-                    <p className="transcript-segment-user">
-                        <strong>Ihre Verdolmetschung ({result.interpretationLang}):</strong><br />
-                        {result.userInterpretation || <em>Keine Aufnahme für dieses Segment.</em>}
-                    </p>
+                    <div className="transcript-segment-user">
+                        <strong>Ihre Verdolmetschung ({result.interpretationLang}):</strong>
+                        {editingState.index === index ? (
+                             <textarea
+                                className="text-area-editor is-editing"
+                                value={editingState.text}
+                                onChange={handleTextChange}
+                                style={{ width: '100%', minHeight: '80px', marginTop: '0.5rem' }}
+                            />
+                        ) : (
+                             <p style={{whiteSpace: 'pre-wrap', marginTop: '0.5rem'}}>
+                                {result.userInterpretation || <em>Keine Aufnahme für dieses Segment.</em>}
+                             </p>
+                        )}
+                    </div>
                 </div>
             ))}
         </div>
