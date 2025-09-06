@@ -364,27 +364,30 @@ const SettingsPanel = ({ settings, setSettings, onStart, onFileUpload, isLoading
 
   const renderAiOptions = () => {
       if (settings.sourceType === 'upload' && settings.mode !== 'Gesprächsdolmetschen' && settings.mode !== 'Stegreifübersetzen') return null;
+      
+      const isMonologue = settings.mode === 'Vortragsdolmetschen' || settings.mode === 'Simultandolmetschen' || settings.mode === 'Shadowing';
+
       return (
           <>
               <div className="form-group">
                   <label htmlFor="topic">Thema</label>
                   <input type="text" id="topic" className="form-control" value={settings.topic} onChange={e => handleSettingChange('topic', e.target.value)} />
               </div>
-              {settings.mode === 'Gesprächsdolmetschen' || settings.mode === 'Stegreifübersetzen' ? (
+              {settings.mode === 'Gesprächsdolmetschen' ? (
                   <div className="form-group">
                       <label htmlFor="qaLength">Satzlänge</label>
                       <select id="qaLength" className="form-control" value={settings.qaLength} onChange={e => handleSettingChange('qaLength', e.target.value)}>
                           {QA_LENGTHS.map(len => <option key={len} value={len}>{len}</option>)}
                       </select>
                   </div>
-              ) : (
+              ) : isMonologue ? (
                   <div className="form-group">
                       <label htmlFor="speechLength">Textlänge</label>
                       <select id="speechLength" className="form-control" value={settings.speechLength} onChange={e => handleSettingChange('speechLength', e.target.value)}>
                           {SPEECH_LENGTHS.map(len => <option key={len} value={len}>{len}</option>)}
                       </select>
                   </div>
-              )}
+              ) : null}
           </>
       );
   };
@@ -434,6 +437,7 @@ const SettingsPanel = ({ settings, setSettings, onStart, onFileUpload, isLoading
             {renderSourceTypeOptions()}
             {renderAiOptions()}
             {renderUploadOptions()}
+            {settings.mode !== 'Stegreifübersetzen' && (
              <div className="form-group">
                 <label htmlFor="voiceQuality">Stimmqualität</label>
                 <select id="voiceQuality" className="form-control" value={settings.voiceQuality} onChange={e => handleSettingChange('voiceQuality', e.target.value as VoiceQuality)}>
@@ -441,6 +445,7 @@ const SettingsPanel = ({ settings, setSettings, onStart, onFileUpload, isLoading
                     <option value="Premium">Premium (bessere Qualität)</option>
                 </select>
             </div>
+            )}
         </div>
         <div className="settings-footer">
             <button className="btn btn-primary btn-large" onClick={onStart} disabled={isLoading}>
