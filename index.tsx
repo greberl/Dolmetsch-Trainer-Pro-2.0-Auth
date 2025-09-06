@@ -82,17 +82,14 @@ interface ErrorAnalysisItem {
     interpretation: string;
     suggestion: string;
     explanation: string;
-    type: string;
+    type: "Inhalt" | "Sprache";
 }
 
 interface Feedback {
-    clarity: number;
-    accuracy: number;
-    completeness: number;
-    style: number;
-    terminology: number;
-    overall: number;
-    summary: string;
+    contentRating: number;
+    languageRating: number;
+    contentSummary: string;
+    languageSummary: string;
     errorAnalysis: ErrorAnalysisItem[];
 }
 
@@ -693,26 +690,36 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
         ${transcriptForFeedback}
         """
 
-        Aufgabe: Analysiere die Verdolmetschung. Bewerte sie in den folgenden Kategorien von 1 (sehr schlecht) bis 5 (ausgezeichnet): Klarheit/Verständlichkeit, Genauigkeit, Vollständigkeit, Stil/Register, Terminologie. Gib auch eine Gesamtbewertung (1-5). Erstelle eine kurze Zusammenfassung (2-3 Sätze) der Leistung.
-        Erstelle dann eine detaillierte Fehleranalyse. Identifiziere bis zu 5 signifikante Fehler oder verbesserungswürdige Stellen. Für jeden Punkt, gib den originalen Teil, die Interpretation des Nutzers, einen Korrekturvorschlag und eine kurze Erklärung an.
+        Aufgabe:
+        Analysiere die Verdolmetschung. Gib dein Feedback in zwei Hauptkategorien: "Inhaltliche Richtigkeit" und "Sprachliche Richtigkeit".
+
+        1. Inhaltliche Richtigkeit:
+           - Bewerte auf einer Skala von 1 (sehr schlecht) bis 10 (ausgezeichnet), wie genau der Inhalt wiedergegeben wurde. Berücksichtige Auslassungen, Hinzufügungen oder inhaltliche Fehler.
+           - Gib eine kurze Zusammenfassung (2-3 Sätze) der inhaltlichen Leistung.
+
+        2. Sprachliche Richtigkeit:
+           - Bewerte auf einer Skala von 1 (sehr schlecht) bis 10 (ausgezeichnet), wie korrekt die Zielsprache verwendet wurde. Berücksichtige Grammatik, Terminologie, Stil und Register.
+           - Gib eine kurze Zusammenfassung (2-3 Sätze) der sprachlichen Leistung.
+
+        3. Fehleranalyse:
+           - Identifiziere bis zu 5 signifikante Fehler oder verbesserungswürdige Stellen.
+           - Klassifiziere jeden Fehler als "Inhalt" oder "Sprache".
+           - Gib für jeden Fehler den originalen Teil, die Interpretation des Nutzers, einen Korrekturvorschlag und eine kurze Erklärung an.
         
         Gib deine Antwort NUR als JSON-Objekt im folgenden Format aus. Keine zusätzlichen Texte oder Erklärungen.
 
         {
-          "clarity": number,
-          "accuracy": number,
-          "completeness": number,
-          "style": number,
-          "terminology": number,
-          "overall": number,
-          "summary": "string",
+          "contentRating": number,
+          "languageRating": number,
+          "contentSummary": "string",
+          "languageSummary": "string",
           "errorAnalysis": [
             {
               "original": "string",
               "interpretation": "string",
               "suggestion": "string",
               "explanation": "string",
-              "type": "string (z.B. 'Auslassung', 'Terminologiefehler', 'Grammatikfehler', 'Stilfehler')"
+              "type": "'Inhalt' or 'Sprache'"
             }
           ]
         }
@@ -827,6 +834,8 @@ const DialoguePractice = ({ settings, dialogue }: {
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const recognition = useRef<SpeechRecognition | null>(null);
     const [activeTab, setActiveTab] = useState<'practice' | 'results'>('practice');
+    const [feedback, setFeedback] = useState<Feedback | null>(null);
+    const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
 
     const currentSegment = dialogue[segmentIndex];
     const targetLang = currentSegment?.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang;
@@ -878,7 +887,8 @@ const DialoguePractice = ({ settings, dialogue }: {
                     userInterpretation: punctuatedTexts[index]
                 }));
                 setProcessedResults(newResults);
-            } catch (error) {
+            } catch (error)
+            {
                 console.error("Failed to punctuate dialogue results:", error);
                 setProcessedResults(dialogueResults); // Fallback to raw results
             } finally {
@@ -944,6 +954,57 @@ const DialoguePractice = ({ settings, dialogue }: {
         }
     };
     
+    const getFeedbackForDialogue = async () => {
+        const resultsForFeedback = processedResults || dialogueResults;
+        if (!resultsForFeedback || resultsForFeedback.length === 0) return;
+        
+        setIsGeneratingFeedback(true);
+        setFeedback(null);
+
+        const resultsText = resultsForFeedback.map((r, i) => `
+            --- Segment ${i + 1} ---
+            Original (${r.originalSegment.lang}): "${r.originalSegment.text}"
+            Verdolmetschung des Benutzers (${r.interpretationLang}): "${r.userInterpretation}"
+        `).join('');
+
+        const prompt = `
+            Kontext: Eine Gesprächsdolmetsch-Übung. Person A spricht ${settings.sourceLang}, Person B spricht ${settings.targetLang}. Der Benutzer dolmetscht in die jeweils andere Sprache.
+
+            Dialogverlauf und Verdolmetschung:
+            ${resultsText}
+
+            Aufgabe:
+            Analysiere die GESAMTE Verdolmetschungsleistung des Benutzers über alle Segmente hinweg. Gib dein Feedback in zwei Hauptkategorien: "Inhaltliche Richtigkeit" und "Sprachliche Richtigkeit".
+
+            1. Inhaltliche Richtigkeit:
+               - Bewerte auf einer Skala von 1 (sehr schlecht) bis 10 (ausgezeichnet), wie genau der Inhalt wiedergegeben wurde.
+               - Gib eine kurze Zusammenfassung (2-3 Sätze) der inhaltlichen Leistung.
+
+            2. Sprachliche Richtigkeit:
+               - Bewerte auf einer Skala von 1 (sehr schlecht) bis 10 (ausgezeichnet), wie korrekt die Zielsprache verwendet wurde (Grammatik, Terminologie, Stil).
+               - Gib eine kurze Zusammenfassung (2-3 Sätze) der sprachlichen Leistung.
+
+            3. Fehleranalyse:
+               - Identifiziere bis zu 5 signifikante Fehler. Klassifiziere jeden als "Inhalt" oder "Sprache".
+               - Gib für jeden Fehler den originalen Teil, die Interpretation des Nutzers, einen Korrekturvorschlag und eine kurze Erklärung an.
+            
+            Gib deine Antwort NUR als JSON-Objekt im folgenden Format aus:
+            {
+              "contentRating": number, "languageRating": number, "contentSummary": "string", "languageSummary": "string",
+              "errorAnalysis": [{"original": "string", "interpretation": "string", "suggestion": "string", "explanation": "string", "type": "'Inhalt' or 'Sprache'"}]
+            }
+        `;
+        try {
+            const feedbackText = await generateContentWithRetry(prompt);
+            const feedbackJson = JSON.parse(feedbackText);
+            setFeedback(feedbackJson);
+        } catch (error) {
+            console.error("Error getting feedback for dialogue:", error);
+        } finally {
+            setIsGeneratingFeedback(false);
+        }
+    };
+    
     const getStatusText = () => {
         if (!currentSegment) return "Übung beendet.";
         const participant = currentSegment.lang === settings.sourceLang ? 'A' : 'B';
@@ -964,7 +1025,7 @@ const DialoguePractice = ({ settings, dialogue }: {
                     <button className="tab-btn" onClick={() => setActiveTab('practice')}>Übung</button>
                     <button className="tab-btn active">Ergebnisse</button>
                 </div>
-                <div className="tab-content">
+                <div className="tab-content" style={{gap: '1.5rem'}}>
                     {isProcessingResults ? (
                         <div className="loading-overlay" style={{ position: 'relative', background: 'transparent' }}>
                             <div className="spinner"></div>
@@ -973,6 +1034,12 @@ const DialoguePractice = ({ settings, dialogue }: {
                     ) : (
                         <StructuredTranscript results={processedResults || []} onUpdateResult={handleUpdateResult} />
                     )}
+                    <FeedbackDisplay
+                        feedback={feedback}
+                        isLoading={isGeneratingFeedback}
+                        onGenerate={getFeedbackForDialogue}
+                        transcriptProvided={(processedResults || dialogueResults).length > 0}
+                    />
                 </div>
             </div>
         )
@@ -1022,6 +1089,8 @@ const SightTranslationPractice = ({ settings, dialogue }: {
     const [isRecording, setIsRecording] = useState(false);
     const recognition = useRef<SpeechRecognition | null>(null);
     const [activeTab, setActiveTab] = useState<'practice' | 'results'>('practice');
+    const [feedback, setFeedback] = useState<Feedback | null>(null);
+    const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
 
     const currentSegment = editableDialogue[segmentIndex];
     const targetLang = currentSegment?.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang;
@@ -1119,6 +1188,57 @@ const SightTranslationPractice = ({ settings, dialogue }: {
             setIsRecording(true);
        }
     };
+    
+    const getFeedbackForSightTranslation = async () => {
+        const resultsForFeedback = processedResults || dialogueResults;
+        if (!resultsForFeedback || resultsForFeedback.length === 0) return;
+        
+        setIsGeneratingFeedback(true);
+        setFeedback(null);
+
+        const resultsText = resultsForFeedback.map((r, i) => `
+            --- Segment ${i + 1} ---
+            Original (${r.originalSegment.lang}): "${r.originalSegment.text}"
+            Verdolmetschung des Benutzers (${r.interpretationLang}): "${r.userInterpretation}"
+        `).join('');
+
+        const prompt = `
+            Kontext: Eine Stegreifübersetzungs-Übung von ${settings.sourceLang} nach ${targetLang}.
+
+            Originaltext und Verdolmetschung:
+            ${resultsText}
+
+            Aufgabe:
+            Analysiere die Verdolmetschungsleistung. Gib dein Feedback in zwei Hauptkategorien: "Inhaltliche Richtigkeit" und "Sprachliche Richtigkeit".
+
+            1. Inhaltliche Richtigkeit:
+               - Bewerte auf einer Skala von 1 (sehr schlecht) bis 10 (ausgezeichnet), wie genau der Inhalt wiedergegeben wurde.
+               - Gib eine kurze Zusammenfassung (2-3 Sätze) der inhaltlichen Leistung.
+
+            2. Sprachliche Richtigkeit:
+               - Bewerte auf einer Skala von 1 (sehr schlecht) bis 10 (ausgezeichnet), wie korrekt die Zielsprache verwendet wurde (Grammatik, Terminologie, Stil).
+               - Gib eine kurze Zusammenfassung (2-3 Sätze) der sprachlichen Leistung.
+
+            3. Fehleranalyse:
+               - Identifiziere bis zu 5 signifikante Fehler. Klassifiziere jeden als "Inhalt" oder "Sprache".
+               - Gib für jeden Fehler den originalen Teil, die Interpretation des Nutzers, einen Korrekturvorschlag und eine kurze Erklärung an.
+            
+            Gib deine Antwort NUR als JSON-Objekt im folgenden Format aus:
+            {
+              "contentRating": number, "languageRating": number, "contentSummary": "string", "languageSummary": "string",
+              "errorAnalysis": [{"original": "string", "interpretation": "string", "suggestion": "string", "explanation": "string", "type": "'Inhalt' or 'Sprache'"}]
+            }
+        `;
+        try {
+            const feedbackText = await generateContentWithRetry(prompt);
+            const feedbackJson = JSON.parse(feedbackText);
+            setFeedback(feedbackJson);
+        } catch (error) {
+            console.error("Error getting feedback for sight translation:", error);
+        } finally {
+            setIsGeneratingFeedback(false);
+        }
+    };
 
     const renderResults = () => (
         <div className="panel practice-area">
@@ -1126,7 +1246,7 @@ const SightTranslationPractice = ({ settings, dialogue }: {
                 <button className="tab-btn" onClick={() => setActiveTab('practice')}>Übung</button>
                 <button className="tab-btn active">Ergebnisse</button>
             </div>
-            <div className="tab-content">
+            <div className="tab-content" style={{gap: '1.5rem'}}>
                 {isProcessingResults ? (
                     <div className="loading-overlay" style={{ position: 'relative', background: 'transparent' }}>
                         <div className="spinner"></div>
@@ -1135,6 +1255,12 @@ const SightTranslationPractice = ({ settings, dialogue }: {
                 ) : (
                     <StructuredTranscript results={processedResults || dialogueResults} onUpdateResult={handleUpdateResult} />
                 )}
+                <FeedbackDisplay
+                    feedback={feedback}
+                    isLoading={isGeneratingFeedback}
+                    onGenerate={getFeedbackForSightTranslation}
+                    transcriptProvided={(processedResults || dialogueResults).length > 0}
+                />
             </div>
         </div>
     );
@@ -1184,6 +1310,13 @@ const SightTranslationPractice = ({ settings, dialogue }: {
     );
 };
 
+const StarRating = ({ score, maxScore = 10 }: { score: number, maxScore?: number }) => (
+    <span className="star-rating">
+      {[...Array(maxScore)].map((_, i) => (
+        <span key={i} className={`star ${i < score ? 'filled' : ''}`}>★</span>
+      ))}
+    </span>
+);
 
 const FeedbackDisplay = ({ feedback, isLoading, onGenerate, transcriptProvided }: {
   feedback: Feedback | null;
@@ -1202,7 +1335,7 @@ const FeedbackDisplay = ({ feedback, isLoading, onGenerate, transcriptProvided }
 
   if (!feedback) {
     return (
-      <div className="placeholder">
+      <div className="placeholder" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem', marginTop: '1.5rem' }}>
         <h2>Feedback</h2>
         <p>Nachdem Sie eine Verdolmetschung aufgenommen haben, können Sie hier eine detaillierte KI-Analyse anfordern.</p>
         <button className="btn btn-primary btn-large" onClick={onGenerate} disabled={!transcriptProvided}>
@@ -1212,41 +1345,41 @@ const FeedbackDisplay = ({ feedback, isLoading, onGenerate, transcriptProvided }
     );
   }
 
-  const StarRating = ({ score }: { score: number }) => (
-    <span>
-      {[...Array(5)].map((_, i) => (
-        <span key={i} className={`star ${i < score ? 'filled' : ''}`}>★</span>
-      ))}
-    </span>
-  );
-
   return (
     <div className="feedback-content">
-        <h3>Zusammenfassung</h3>
-        <p>{feedback.summary}</p>
-        
+        <h3>Bewertung</h3>
         <table className="ratings-table">
             <tbody>
-                <tr><td>Klarheit/Verständlichkeit</td><td><StarRating score={feedback.clarity} /></td></tr>
-                <tr><td>Genauigkeit</td><td><StarRating score={feedback.accuracy} /></td></tr>
-                <tr><td>Vollständigkeit</td><td><StarRating score={feedback.completeness} /></td></tr>
-                <tr><td>Stil/Register</td><td><StarRating score={feedback.style} /></td></tr>
-                <tr><td>Terminologie</td><td><StarRating score={feedback.terminology} /></td></tr>
-                <tr><td><strong>Gesamt</strong></td><td><strong><StarRating score={feedback.overall} /></strong></td></tr>
+                <tr>
+                    <td>Inhaltliche Richtigkeit</td>
+                    <td><StarRating score={feedback.contentRating} maxScore={10} /> ({feedback.contentRating}/10)</td>
+                </tr>
+                <tr>
+                    <td colSpan={2} className="summary-cell">{feedback.contentSummary}</td>
+                </tr>
+                <tr>
+                    <td>Sprachliche Richtigkeit</td>
+                    <td><StarRating score={feedback.languageRating} maxScore={10} /> ({feedback.languageRating}/10)</td>
+                </tr>
+                 <tr>
+                    <td colSpan={2} className="summary-cell">{feedback.languageSummary}</td>
+                </tr>
             </tbody>
         </table>
 
         <h3>Fehleranalyse</h3>
         <ul className="error-analysis-list">
-            {feedback.errorAnalysis.map((item, index) => (
+            {feedback.errorAnalysis.length > 0 ? feedback.errorAnalysis.map((item, index) => (
                 <li key={index}>
-                    <p><strong>Typ:</strong> {item.type}</p>
-                    <p><strong>Original:</strong> "{item.original}"</p>
+                    <p>
+                      <span className={`error-type ${item.type.toLowerCase() === 'inhalt' ? 'inhalt' : 'sprache'}`}>{item.type}</span>
+                      <strong>Original:</strong> "{item.original}"
+                    </p>
                     <p><strong>Ihre Version:</strong> "{item.interpretation}"</p>
                     <p><strong>Vorschlag:</strong> "{item.suggestion}"</p>
                     <p><strong>Erklärung:</strong> {item.explanation}</p>
                 </li>
-            ))}
+            )) : <p>Keine spezifischen Fehler gefunden. Gute Arbeit!</p>}
         </ul>
         <button className="btn btn-secondary" onClick={onGenerate} style={{marginTop: '1rem'}}>
           Feedback erneut generieren

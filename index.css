@@ -1,5 +1,3 @@
-
-
 :root {
   --primary-color: #007bff;
   --primary-hover-color: #0056b3;
@@ -9,6 +7,7 @@
   --text-color: #212529;
   --border-color: #dee2e6;
   --error-color: #dc3545;
+  --success-color: #28a745;
 
   --font-family: 'Inter', sans-serif;
   --border-radius: 8px;
@@ -466,11 +465,13 @@ textarea.form-control {
 }
 .ratings-table {
     width: 100%;
+    max-width: 600px;
     margin: 1rem 0;
     font-size: 1rem;
+    border-collapse: collapse;
 }
 .ratings-table td {
-    padding: 0.5rem;
+    padding: 0.75rem 0.5rem;
     vertical-align: middle;
 }
 .ratings-table td:first-child {
@@ -479,14 +480,30 @@ textarea.form-control {
 .ratings-table td:last-child {
     text-align: right;
     font-weight: 500;
+    white-space: nowrap;
+}
+.star-rating {
+    letter-spacing: 2px;
 }
 .star {
-    font-size: 1.5rem;
+    font-size: 1.2rem;
     color: #e0e0e0;
 }
 .star.filled {
     color: #fdd835;
 }
+.ratings-table td.summary-cell {
+    padding-top: 0.25rem;
+    padding-bottom: 1.25rem;
+    font-size: 0.9rem;
+    font-style: italic;
+    color: var(--secondary-color);
+    border-bottom: 1px solid var(--border-color);
+}
+.ratings-table tr:last-child td.summary-cell {
+    border-bottom: none;
+}
+
 
 .error-analysis-list {
     list-style-type: none;
@@ -504,7 +521,30 @@ textarea.form-control {
     font-size: 0.95rem;
 }
 .error-analysis-list strong {
-    color: var(--primary-color);
+    color: var(--text-color);
+}
+
+.error-analysis-list .error-type {
+    display: inline-block;
+    padding: 0.2em 0.6em 0.3em;
+    font-size: 0.75em;
+    font-weight: 700;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: baseline;
+    border-radius: 0.25rem;
+    color: #fff;
+    margin-right: 0.75rem;
+    text-transform: uppercase;
+    position: relative;
+    top: -1px;
+}
+.error-type.inhalt {
+    background-color: var(--primary-color);
+}
+.error-type.sprache {
+    background-color: var(--success-color);
 }
 
 /* Dialogue Mode Styles */
