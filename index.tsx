@@ -542,6 +542,7 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognition = useRef<SpeechRecognition | null>(null);
+  const [isEditingOriginalText, setIsEditingOriginalText] = useState(false);
 
   const targetLang = mode === 'shadowing' ? settings.sourceLang : settings.targetLang;
 
@@ -623,6 +624,10 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
     }
   };
   
+  const handleEditToggle = () => {
+    setIsEditingOriginalText(prev => !prev);
+  };
+  
   const getFeedback = async () => {
       setIsGeneratingFeedback(true);
       setFeedback(null);
@@ -697,9 +702,25 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
                     )}
                  </button>
                  <p>Originaltext anhören</p>
+                 <button className="btn btn-secondary" onClick={handleEditToggle} style={{ marginLeft: 'auto' }}>
+                    {isEditingOriginalText ? 'Speichern' : 'Bearbeiten'}
+                 </button>
             </div>
             <div className="text-area">
-                <textarea className="text-area-editor" value={originalText} onChange={(e) => setOriginalText(e.target.value)} />
+                <textarea
+                    className={`text-area-editor ${isEditingOriginalText ? 'is-editing' : ''}`}
+                    value={originalText}
+                    onChange={(e) => {
+                        setOriginalText(e.target.value);
+                        // Invalidate existing audio if text changes
+                        if (audioRef.current) {
+                            audioRef.current.pause();
+                            setIsPlaying(false);
+                            audioRef.current = null;
+                        }
+                    }}
+                    readOnly={!isEditingOriginalText}
+                />
             </div>
           </>
         )}
@@ -917,6 +938,8 @@ const SightTranslationPractice = ({ settings, dialogue }: {
   settings: Settings;
   dialogue: DialogueSegment[];
 }) => {
+    const [editableDialogue, setEditableDialogue] = useState(dialogue);
+    const [isEditing, setIsEditing] = useState(false);
     const [segmentIndex, setSegmentIndex] = useState(0);
     const [dialogueResults, setDialogueResults] = useState<StructuredDialogueResult[]>([]);
     const [currentTranscript, setCurrentTranscript] = useState('');
@@ -924,9 +947,21 @@ const SightTranslationPractice = ({ settings, dialogue }: {
     const recognition = useRef<SpeechRecognition | null>(null);
     const [activeTab, setActiveTab] = useState<'practice' | 'results'>('practice');
 
-    const currentSegment = dialogue[segmentIndex];
+    const currentSegment = editableDialogue[segmentIndex];
     const targetLang = currentSegment?.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang;
     
+    // Handlers for editing
+    const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const newText = e.target.value;
+        const updatedDialogue = [...editableDialogue];
+        updatedDialogue[segmentIndex] = { ...updatedDialogue[segmentIndex], text: newText };
+        setEditableDialogue(updatedDialogue);
+    };
+
+    const handleEditToggle = () => {
+        setIsEditing(prev => !prev);
+    };
+
     // Speech Recognition Setup
     useEffect(() => {
         if (!currentSegment) return; // Guard against running when dialogue is finished
@@ -1051,9 +1086,18 @@ const SightTranslationPractice = ({ settings, dialogue }: {
         <div className="panel practice-area dialogue-practice-container">
             <div className="dialogue-status">
                 Segment {segmentIndex + 1} / {dialogue.length} ({currentSegment.lang} {'->'} {targetLang})
+                <button className="btn btn-secondary" onClick={handleEditToggle} style={{ marginLeft: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>
+                    {isEditing ? 'Speichern' : 'Bearbeiten'}
+                </button>
             </div>
             <div className="text-area" style={{ flexGrow: 1, border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius)', padding: '1rem' }}>
-                <p>{currentSegment.text}</p>
+                <textarea
+                    className={`text-area-editor ${isEditing ? 'is-editing' : ''}`}
+                    value={currentSegment.text}
+                    onChange={handleTextChange}
+                    readOnly={!isEditing}
+                    style={{ height: '100%' }}
+                />
             </div>
             <div className="text-area" style={{ height: '150px', marginTop: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius)', padding: '1rem', backgroundColor: '#f8f9fa' }}>
                 <p>{currentTranscript || "..."}</p>

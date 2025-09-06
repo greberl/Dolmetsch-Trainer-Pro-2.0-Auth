@@ -345,6 +345,16 @@ textarea.form-control {
     box-shadow: none; /* Override form-control focus */
 }
 
+.text-area-editor.is-editing {
+    background-color: rgba(0, 123, 255, 0.03);
+}
+
+/* Restore focus outline only when editable */
+.text-area-editor.is-editing:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+}
+
 .controls-bar {
     display: flex;
     gap: 1rem;
@@ -504,6 +514,8 @@ textarea.form-control {
     text-align: center;
     font-weight: 500;
     margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
 }
 
 .current-segment-display {
