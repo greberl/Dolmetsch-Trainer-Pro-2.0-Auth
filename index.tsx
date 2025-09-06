@@ -251,7 +251,7 @@ const App = () => {
     sourceLang: "Deutsch",
     targetLang: "Englisch",
     sourceType: "ai",
-    topic: "Erneuerbare Energien",
+    topic: "",
     qaLength: "2-4 Sätze",
     speechLength: "Kurz",
     voiceQuality: "Premium",
@@ -418,8 +418,8 @@ const SettingsPanel = ({ settings, setSettings, onStart, onFileUpload, isLoading
       return (
           <>
               <div className="form-group">
-                  <label htmlFor="topic">Thema</label>
-                  <input type="text" id="topic" className="form-control" value={settings.topic} onChange={e => handleSettingChange('topic', e.target.value)} />
+                  <label htmlFor="topic">Thema und Schwierigkeitsgrad</label>
+                  <input type="text" id="topic" className="form-control" value={settings.topic} onChange={e => handleSettingChange('topic', e.target.value)} placeholder="z. B. Geldpolitik für Laien" />
               </div>
               {isDialogue ? (
                   <div className="form-group">
