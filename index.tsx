@@ -119,14 +119,18 @@ const VOICE_MAP: Record<Language, Record<VoiceQuality, string>> = {
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // --- API HELPERS ---
-const generateContentWithRetry = async (prompt: string, retries = 3, delay = 1000) => {
+const generateContentWithRetry = async (prompt: string, retries = 3, delay = 1000): Promise<string> => {
     for (let i = 0; i < retries; i++) {
         try {
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash',
                 contents: prompt,
             });
-            return response.text;
+            const text = response.text;
+            if (text === undefined) {
+                throw new Error("API response did not contain text.");
+            }
+            return text;
         } catch (error) {
             console.error(`Attempt ${i + 1} failed:`, error);
             if (i === retries - 1) throw error;
