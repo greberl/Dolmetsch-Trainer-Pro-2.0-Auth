@@ -702,9 +702,12 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
                     )}
                  </button>
                  <p>Originaltext anhören</p>
-                 <button className="btn btn-secondary" onClick={handleEditToggle} style={{ marginLeft: 'auto' }}>
-                    {isEditingOriginalText ? 'Speichern' : 'Bearbeiten'}
-                 </button>
+                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <span className="char-counter">{originalText.length} Zeichen</span>
+                    <button className="btn btn-secondary" onClick={handleEditToggle}>
+                        {isEditingOriginalText ? 'Speichern' : 'Bearbeiten'}
+                    </button>
+                 </div>
             </div>
             <div className="text-area">
                 <textarea
@@ -1086,9 +1089,12 @@ const SightTranslationPractice = ({ settings, dialogue }: {
         <div className="panel practice-area dialogue-practice-container">
             <div className="dialogue-status">
                 Segment {segmentIndex + 1} / {dialogue.length} ({currentSegment.lang} {'->'} {targetLang})
-                <button className="btn btn-secondary" onClick={handleEditToggle} style={{ marginLeft: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>
-                    {isEditing ? 'Speichern' : 'Bearbeiten'}
-                </button>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <span className="char-counter">{currentSegment.text.length} Zeichen</span>
+                    <button className="btn btn-secondary" onClick={handleEditToggle} style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>
+                        {isEditing ? 'Speichern' : 'Bearbeiten'}
+                    </button>
+                </div>
             </div>
             <div className="text-area" style={{ flexGrow: 1, border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius)', padding: '1rem' }}>
                 <textarea

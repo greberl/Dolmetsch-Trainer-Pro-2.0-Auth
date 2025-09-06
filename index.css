@@ -382,6 +382,12 @@ textarea.form-control {
     color: var(--secondary-color);
 }
 
+.char-counter {
+    font-size: 0.9rem;
+    color: var(--secondary-color);
+    white-space: nowrap;
+}
+
 /* Practice Footer & Record Button */
 .practice-footer {
     margin-top: auto;
