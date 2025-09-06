@@ -726,7 +726,13 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
       `;
       try {
           const feedbackText = await generateContentWithRetry(prompt);
-          const feedbackJson = JSON.parse(feedbackText);
+          const jsonStart = feedbackText.indexOf('{');
+          const jsonEnd = feedbackText.lastIndexOf('}');
+          if (jsonStart === -1 || jsonEnd === -1) {
+              throw new Error("AI response does not contain a JSON object.");
+          }
+          const jsonString = feedbackText.substring(jsonStart, jsonEnd + 1);
+          const feedbackJson = JSON.parse(jsonString);
           setFeedback(feedbackJson);
       } catch (error) {
           console.error("Error getting feedback:", error);
@@ -996,7 +1002,13 @@ const DialoguePractice = ({ settings, dialogue }: {
         `;
         try {
             const feedbackText = await generateContentWithRetry(prompt);
-            const feedbackJson = JSON.parse(feedbackText);
+            const jsonStart = feedbackText.indexOf('{');
+            const jsonEnd = feedbackText.lastIndexOf('}');
+            if (jsonStart === -1 || jsonEnd === -1) {
+                throw new Error("AI response does not contain a JSON object.");
+            }
+            const jsonString = feedbackText.substring(jsonStart, jsonEnd + 1);
+            const feedbackJson = JSON.parse(jsonString);
             setFeedback(feedbackJson);
         } catch (error) {
             console.error("Error getting feedback for dialogue:", error);
@@ -1231,7 +1243,13 @@ const SightTranslationPractice = ({ settings, dialogue }: {
         `;
         try {
             const feedbackText = await generateContentWithRetry(prompt);
-            const feedbackJson = JSON.parse(feedbackText);
+            const jsonStart = feedbackText.indexOf('{');
+            const jsonEnd = feedbackText.lastIndexOf('}');
+            if (jsonStart === -1 || jsonEnd === -1) {
+                throw new Error("AI response does not contain a JSON object.");
+            }
+            const jsonString = feedbackText.substring(jsonStart, jsonEnd + 1);
+            const feedbackJson = JSON.parse(jsonString);
             setFeedback(feedbackJson);
         } catch (error) {
             console.error("Error getting feedback for sight translation:", error);
