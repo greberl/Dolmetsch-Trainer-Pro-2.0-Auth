@@ -281,20 +281,14 @@ const App = () => {
   
         const generatedContent = await generateContentWithRetry(prompt);
 
-        if (isMonologueMode) {
+        if (isMonologueMode || isSightTranslationMode) {
             const adjustedText = await adjustTextLength(generatedContent, settings);
             setOriginalText(adjustedText);
-        } else if (isSightTranslationMode) {
-            const adjustedText = await adjustTextLength(generatedContent, settings);
-            const sightTranslationDialogue: DialogueSegment[] = [{
-                type: 'Frage', // Type is arbitrary for sight translation, just to match the data structure
-                text: adjustedText,
-                lang: settings.sourceLang,
-            }];
-            setDialogue(sightTranslationDialogue);
+            setDialogue([]); // Ensure dialogue is cleared
         } else { // Gesprächsdolmetschen
             const parsedDialogue = JSON.parse(generatedContent);
             setDialogue(parsedDialogue);
+            setOriginalText(''); // Ensure original text is cleared
         }
 
         setExerciseState('ready');
@@ -552,7 +546,7 @@ const PracticeArea = ({ settings, exerciseState, originalText, dialogue, errorMe
       case "Gesprächsdolmetschen":
           return <DialoguePractice settings={settings} dialogue={dialogue} />;
       case "Stegreifübersetzen":
-          return <SightTranslationPractice settings={settings} dialogue={dialogue} />;
+          return <SightTranslationPractice settings={settings} originalText={originalText} />;
       default:
           return <div className="panel practice-area"><p>Modus nicht gefunden.</p></div>;
   }
@@ -1095,245 +1089,230 @@ const DialoguePractice = ({ settings, dialogue }: {
     );
 };
 
-const SightTranslationPractice = ({ settings, dialogue }: {
+const SightTranslationPractice = ({ settings, originalText: initialText }: {
   settings: Settings;
-  dialogue: DialogueSegment[];
+  originalText: string;
 }) => {
-    const [editableDialogue, setEditableDialogue] = useState(dialogue);
-    const [isEditing, setIsEditing] = useState(false);
-    const [segmentIndex, setSegmentIndex] = useState(0);
-    const [dialogueResults, setDialogueResults] = useState<StructuredDialogueResult[]>([]);
-    const [processedResults, setProcessedResults] = useState<StructuredDialogueResult[] | null>(null);
-    const [isProcessingResults, setIsProcessingResults] = useState(false);
-    const [currentTranscript, setCurrentTranscript] = useState('');
-    const [isRecording, setIsRecording] = useState(false);
-    const recognition = useRef<SpeechRecognition | null>(null);
-    const [activeTab, setActiveTab] = useState<'practice' | 'results'>('practice');
-    const [feedback, setFeedback] = useState<Feedback | null>(null);
-    const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
+  const [activeTab, setActiveTab] = useState<PracticeAreaTab>('original');
+  const [originalText, setOriginalText] = useState(initialText);
+  const [rawTranscript, setRawTranscript] = useState('');
+  const [displayTranscript, setDisplayTranscript] = useState<string | null>(null);
+  const [isPunctuating, setIsPunctuating] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
+  const recognition = useRef<SpeechRecognition | null>(null);
+  const [isEditingOriginalText, setIsEditingOriginalText] = useState(false);
+  const [isEditingTranscript, setIsEditingTranscript] = useState(false);
 
-    const currentSegment = editableDialogue[segmentIndex];
-    const targetLang = currentSegment?.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang;
+  const targetLang = settings.targetLang;
 
-    const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const newText = e.target.value;
-        const updatedDialogue = [...editableDialogue];
-        updatedDialogue[segmentIndex] = { ...updatedDialogue[segmentIndex], text: newText };
-        setEditableDialogue(updatedDialogue);
-    };
+  const isRecordingRef = useRef(isRecording);
+  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
 
-    const handleEditToggle = () => setIsEditing(prev => !prev);
-
-    useEffect(() => {
-        if (!currentSegment) return;
-        const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognitionAPI) { console.warn("Speech Recognition not supported."); return; }
+  useEffect(() => {
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognitionAPI) {
         const rec = new SpeechRecognitionAPI();
         rec.continuous = true;
-        rec.interimResults = false;
+        rec.interimResults = true;
         rec.lang = LANG_MAP[targetLang];
+
         rec.onresult = (event: SpeechRecognitionEvent) => {
-            let final = '';
+            let finalTranscript = '';
             for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) { final += event.results[i][0].transcript; }
+                if (event.results[i].isFinal) {
+                    finalTranscript += event.results[i][0].transcript;
+                }
             }
-            setCurrentTranscript(prev => prev + final);
+            setRawTranscript(prev => prev + finalTranscript);
         };
-        rec.onerror = (e) => { console.error("Recognition error:", e); setIsRecording(false); };
-        rec.onend = () => { if (isRecordingRef.current) { rec.start(); } };
+        rec.onerror = (event: SpeechRecognitionErrorEvent) => {
+            console.error("Speech recognition error", event.error, event.message);
+            setIsRecording(false);
+        };
+        rec.onend = () => {
+             if (isRecordingRef.current) {
+                 rec.start();
+             }
+        };
         recognition.current = rec;
-        return () => { isRecordingRef.current = false; rec.stop(); };
-    }, [targetLang, currentSegment]);
-    
-    const isRecordingRef = useRef(isRecording);
-    useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
-
-     useEffect(() => {
-        const processResults = async () => {
-            if (dialogueResults.length === 0 || processedResults) return;
-            setIsProcessingResults(true);
-            try {
-                const promises = dialogueResults.map(r => punctuateTextWithAI(r.userInterpretation, r.interpretationLang));
-                const punctuatedTexts = await Promise.all(promises);
-                const newResults = dialogueResults.map((result, index) => ({ ...result, userInterpretation: punctuatedTexts[index] }));
-                setProcessedResults(newResults);
-            } catch (error) {
-                console.error("Failed to punctuate sight translation results:", error);
-                setProcessedResults(dialogueResults); // Fallback
-            } finally {
-                setIsProcessingResults(false);
-            }
-        };
-
-        if (activeTab === 'results') {
-            processResults();
+        return () => {
+          isRecordingRef.current = false;
+          recognition.current?.stop();
         }
-    }, [activeTab, dialogueResults, processedResults]);
-
-    const handleUpdateResult = (index: number, newText: string) => {
-        setProcessedResults(prev => {
-            if (!prev) return null;
-            const updated = [...prev];
-            updated[index] = { ...updated[index], userInterpretation: newText };
-            return updated;
-        });
-    };
-
-    const handleNextSegment = () => {
-        if (isRecording) { handleRecordClick(); }
-        if (!currentSegment) return;
-         setDialogueResults(prev => [...prev, {
-            originalSegment: currentSegment,
-            userInterpretation: currentTranscript,
-            interpretationLang: targetLang
-        }]);
-        setCurrentTranscript('');
-
-        const nextIndex = segmentIndex + 1;
-        if (nextIndex < dialogue.length) {
-            setSegmentIndex(nextIndex);
-        } else {
-            setActiveTab('results');
-        }
-    };
-    
-    const handleRecordClick = () => {
-       if (isRecording) {
-           isRecordingRef.current = false;
-           recognition.current?.stop();
-           setIsRecording(false);
-       } else {
-            setCurrentTranscript('');
-            recognition.current?.start();
-            setIsRecording(true);
-       }
-    };
-    
-    const getFeedbackForSightTranslation = async () => {
-        const resultsForFeedback = processedResults || dialogueResults;
-        if (!resultsForFeedback || resultsForFeedback.length === 0) return;
-        
-        setIsGeneratingFeedback(true);
-        setFeedback(null);
-
-        const resultsText = resultsForFeedback.map((r, i) => `
-            --- Segment ${i + 1} ---
-            Original (${r.originalSegment.lang}): "${r.originalSegment.text}"
-            Verdolmetschung des Benutzers (${r.interpretationLang}): "${r.userInterpretation}"
-        `).join('');
-
-        const prompt = `
-            Kontext: Eine Stegreifübersetzungs-Übung von ${settings.sourceLang} nach ${targetLang}.
-
-            Originaltext und Verdolmetschung:
-            ${resultsText}
-
-            Aufgabe:
-            Analysiere die Verdolmetschungsleistung. Gib dein Feedback in zwei Hauptkategorien: "Inhaltliche Richtigkeit" und "Sprachliche Richtigkeit".
-
-            1. Inhaltliche Richtigkeit:
-               - Bewerte auf einer Skala von 1 (sehr schlecht) bis 10 (ausgezeichnet), wie genau der Inhalt wiedergegeben wurde.
-               - Gib eine kurze Zusammenfassung (2-3 Sätze) der inhaltlichen Leistung.
-
-            2. Sprachliche Richtigkeit:
-               - Bewerte auf einer Skala von 1 (sehr schlecht) bis 10 (ausgezeichnet), wie korrekt die Zielsprache verwendet wurde (Grammatik, Terminologie, Stil).
-               - Gib eine kurze Zusammenfassung (2-3 Sätze) der sprachlichen Leistung.
-
-            3. Fehleranalyse:
-               - Identifiziere bis zu 5 signifikante Fehler. Klassifiziere jeden als "Inhalt" oder "Sprache".
-               - Gib für jeden Fehler den originalen Teil, die Interpretation des Nutzers, einen Korrekturvorschlag und eine kurze Erklärung an.
-            
-            Gib deine Antwort NUR als JSON-Objekt im folgenden Format aus:
-            {
-              "contentRating": number, "languageRating": number, "contentSummary": "string", "languageSummary": "string",
-              "errorAnalysis": [{"original": "string", "interpretation": "string", "suggestion": "string", "explanation": "string", "type": "'Inhalt' or 'Sprache'"}]
-            }
-        `;
-        try {
-            const feedbackText = await generateContentWithRetry(prompt);
-            const jsonStart = feedbackText.indexOf('{');
-            const jsonEnd = feedbackText.lastIndexOf('}');
-            if (jsonStart === -1 || jsonEnd === -1) {
-                throw new Error("AI response does not contain a JSON object.");
-            }
-            const jsonString = feedbackText.substring(jsonStart, jsonEnd + 1);
-            const feedbackJson = JSON.parse(jsonString);
-            setFeedback(feedbackJson);
-        } catch (error) {
-            console.error("Error getting feedback for sight translation:", error);
-        } finally {
-            setIsGeneratingFeedback(false);
-        }
-    };
-
-    const renderResults = () => (
-        <div className="panel practice-area">
-            <div className="tabs">
-                <button className="tab-btn" onClick={() => setActiveTab('practice')}>Übung</button>
-                <button className="tab-btn active">Ergebnisse</button>
-            </div>
-            <div className="tab-content" style={{gap: '1.5rem'}}>
-                {isProcessingResults ? (
-                    <div className="loading-overlay" style={{ position: 'relative', background: 'transparent' }}>
-                        <div className="spinner"></div>
-                        <p>Ergebnisse werden aufbereitet...</p>
-                    </div>
-                ) : (
-                    <StructuredTranscript results={processedResults || dialogueResults} onUpdateResult={handleUpdateResult} />
-                )}
-                <FeedbackDisplay
-                    feedback={feedback}
-                    isLoading={isGeneratingFeedback}
-                    onGenerate={getFeedbackForSightTranslation}
-                    transcriptProvided={(processedResults || dialogueResults).length > 0}
-                />
-            </div>
-        </div>
-    );
-
-    if (!currentSegment || activeTab === 'results') {
-        return renderResults();
+    } else {
+        console.warn("Speech Recognition API not supported in this browser.");
     }
+  }, [targetLang]);
 
-    return (
-        <div className="panel practice-area dialogue-practice-container">
-            <div className="dialogue-status">
-                Segment {segmentIndex + 1} / {dialogue.length} ({currentSegment.lang} {'->'} {targetLang})
-                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <span className="char-counter">{currentSegment.text.length} Zeichen</span>
-                    <button className="btn btn-secondary" onClick={handleEditToggle} style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>
-                        {isEditing ? 'Speichern' : 'Bearbeiten'}
+  const handleTabChange = async (tab: PracticeAreaTab) => {
+    setActiveTab(tab);
+    if (tab === 'transcript' && rawTranscript && displayTranscript === null && !isPunctuating) {
+        setIsPunctuating(true);
+        try {
+            const result = await punctuateTextWithAI(rawTranscript, targetLang);
+            setDisplayTranscript(result);
+        } catch (e) {
+            console.error("Punctuation failed:", e);
+            setDisplayTranscript(rawTranscript); // Fallback to raw transcript on error
+        } finally {
+            setIsPunctuating(false);
+        }
+    }
+  };
+
+  const handleRecord = () => {
+    if (isRecording) {
+      isRecordingRef.current = false;
+      recognition.current?.stop();
+      setIsRecording(false);
+    } else {
+      setRawTranscript('');
+      setDisplayTranscript(null);
+      setFeedback(null);
+      isRecordingRef.current = true;
+      recognition.current?.start();
+      setIsRecording(true);
+    }
+  };
+  
+  const handleEditOriginalTextToggle = () => {
+    setIsEditingOriginalText(prev => !prev);
+  };
+
+  const handleEditTranscriptToggle = () => {
+    setIsEditingTranscript(prev => !prev);
+  };
+  
+  const getFeedback = async () => {
+      const transcriptForFeedback = displayTranscript ?? rawTranscript;
+      if (!transcriptForFeedback) return;
+      
+      setIsGeneratingFeedback(true);
+      setFeedback(null);
+      setActiveTab('feedback');
+
+      const prompt = `
+        Kontext: Eine Stegreifübersetzungs-Übung von ${settings.sourceLang} nach ${targetLang}.
+
+        Originaltext:
+        """
+        ${originalText}
+        """
+
+        Verdolmetschung des Benutzers:
+        """
+        ${transcriptForFeedback}
+        """
+
+        Aufgabe:
+        Analysiere die Verdolmetschungsleistung. Gib dein Feedback in zwei Hauptkategorien: "Inhaltliche Richtigkeit" und "Sprachliche Richtigkeit".
+
+        1. Inhaltliche Richtigkeit:
+           - Bewerte auf einer Skala von 1 (sehr schlecht) bis 10 (ausgezeichnet), wie genau der Inhalt wiedergegeben wurde.
+           - Gib eine kurze Zusammenfassung (2-3 Sätze) der inhaltlichen Leistung.
+
+        2. Sprachliche Richtigkeit:
+           - Bewerte auf einer Skala von 1 (sehr schlecht) bis 10 (ausgezeichnet), wie korrekt die Zielsprache verwendet wurde (Grammatik, Terminologie, Stil).
+           - Gib eine kurze Zusammenfassung (2-3 Sätze) der sprachlichen Leistung.
+
+        3. Fehleranalyse:
+           - Identifiziere bis zu 5 signifikante Fehler. Klassifiziere jeden als "Inhalt" oder "Sprache".
+           - Gib für jeden Fehler den originalen Teil, die Interpretation des Nutzers, einen Korrekturvorschlag und eine kurze Erklärung an.
+        
+        Gib deine Antwort NUR als JSON-Objekt im folgenden Format aus:
+        {
+          "contentRating": number, "languageRating": number, "contentSummary": "string", "languageSummary": "string",
+          "errorAnalysis": [{"original": "string", "interpretation": "string", "suggestion": "string", "explanation": "string", "type": "'Inhalt' or 'Sprache'"}]
+        }
+      `;
+      try {
+          const feedbackText = await generateContentWithRetry(prompt);
+          const jsonStart = feedbackText.indexOf('{');
+          const jsonEnd = feedbackText.lastIndexOf('}');
+          if (jsonStart === -1 || jsonEnd === -1) {
+              throw new Error("AI response does not contain a JSON object.");
+          }
+          const jsonString = feedbackText.substring(jsonStart, jsonEnd + 1);
+          const feedbackJson = JSON.parse(jsonString);
+          setFeedback(feedbackJson);
+      } catch (error) {
+          console.error("Error getting feedback for sight translation:", error);
+      } finally {
+          setIsGeneratingFeedback(false);
+      }
+  };
+
+  return (
+    <div className="panel practice-area">
+      <div className="tabs">
+        <button className={`tab-btn ${activeTab === 'original' ? 'active' : ''}`} onClick={() => handleTabChange('original')}>Originaltext</button>
+        <button className={`tab-btn ${activeTab === 'transcript' ? 'active' : ''}`} onClick={() => handleTabChange('transcript')}>Meine Verdolmetschung</button>
+        <button className={`tab-btn ${activeTab === 'feedback' ? 'active' : ''}`} onClick={() => handleTabChange('feedback')} disabled={!rawTranscript}>Feedback</button>
+      </div>
+      <div className="tab-content">
+        {activeTab === 'original' && (
+          <>
+            <div className="controls-bar">
+                 <p>Originaltext zum Übersetzen</p>
+                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <span className="char-counter">{originalText.length} Zeichen</span>
+                    <button className="btn btn-secondary" onClick={handleEditOriginalTextToggle}>
+                        {isEditingOriginalText ? 'Speichern' : 'Bearbeiten'}
                     </button>
-                </div>
+                 </div>
             </div>
-            <div className="text-area" style={{ flexGrow: 1, border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius)', padding: '1rem' }}>
+            <div className="text-area">
                 <textarea
-                    className={`text-area-editor ${isEditing ? 'is-editing' : ''}`}
-                    value={currentSegment.text}
-                    onChange={handleTextChange}
-                    readOnly={!isEditing}
-                    style={{ height: '100%' }}
+                    className={`text-area-editor ${isEditingOriginalText ? 'is-editing' : ''}`}
+                    value={originalText}
+                    onChange={(e) => setOriginalText(e.target.value)}
+                    readOnly={!isEditingOriginalText}
                 />
             </div>
-            <div className="text-area" style={{ height: '150px', marginTop: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius)', padding: '1rem', backgroundColor: '#f8f9fa' }}>
-                <p>{currentTranscript ? `"${currentTranscript}"` : "..."}</p>
-            </div>
-            
-            <div className="practice-footer">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                     <button
-                        className={`btn-record ${isRecording ? 'recording' : ''}`}
-                        onClick={handleRecordClick}
-                    >
-                        <div className="mic-icon"></div>
-                    </button>
-                    <button className="btn btn-primary" onClick={handleNextSegment}>
-                        {segmentIndex === dialogue.length - 1 ? "Ergebnisse anzeigen" : "Nächstes Segment"}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
+          </>
+        )}
+        {activeTab === 'transcript' && (
+            isPunctuating ? (
+                 <div className="loading-overlay" style={{ position: 'relative', background: 'transparent' }}>
+                    <div className="spinner"></div>
+                    <p>Transkript wird erstellt...</p>
+                 </div>
+            ) : (
+                 <>
+                    <div className="controls-bar">
+                        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                            <span className="char-counter">{(displayTranscript ?? '').length} Zeichen</span>
+                            <button className="btn btn-secondary" onClick={handleEditTranscriptToggle}>
+                                {isEditingTranscript ? 'Speichern' : 'Bearbeiten'}
+                            </button>
+                        </div>
+                    </div>
+                    <div className="text-area">
+                       <textarea 
+                            className={`text-area-editor ${isEditingTranscript ? 'is-editing' : ''}`}
+                            value={displayTranscript ?? ''} 
+                            onChange={(e) => setDisplayTranscript(e.target.value)} 
+                            readOnly={!isEditingTranscript}
+                            placeholder="Hier erscheint Ihre Verdolmetschung nach der Aufnahme..." 
+                        />
+                    </div>
+                 </>
+            )
+        )}
+        {activeTab === 'feedback' && (
+             <FeedbackDisplay feedback={feedback} isLoading={isGeneratingFeedback} onGenerate={getFeedback} transcriptProvided={!!(displayTranscript ?? rawTranscript)} />
+        )}
+      </div>
+      <div className="practice-footer">
+          <p className="recording-status-text">{isRecording ? `Aufnahme in ${targetLang}...` : "Bereit zur Aufnahme"}</p>
+          <button className={`btn-record ${isRecording ? 'recording' : ''}`} onClick={handleRecord}>
+            <div className="mic-icon"></div>
+          </button>
+      </div>
+    </div>
+  );
 };
 
 const StarRating = ({ score, maxScore = 10 }: { score: number, maxScore?: number }) => (
