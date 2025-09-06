@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI } from "@google/genai";
@@ -852,7 +851,10 @@ const DialoguePractice = ({ settings, dialogue }: {
     const [isTextVisible, setIsTextVisible] = useState(false);
     const [feedback, setFeedback] = useState<Feedback | null>(null);
     const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
-    
+    const [audioUrls, setAudioUrls] = useState<string[]>([]);
+    const [isPreparingAudio, setIsPreparingAudio] = useState(false);
+    const [audioPrepError, setAudioPrepError] = useState<string | null>(null);
+
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const recognition = useRef<SpeechRecognition | null>(null);
     const practiceStateRef = useRef(practiceState);
@@ -860,6 +862,36 @@ const DialoguePractice = ({ settings, dialogue }: {
 
     const currentSegment = dialogue[segmentIndex];
     const targetLang = currentSegment?.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang;
+
+    useEffect(() => {
+        if (dialogue && dialogue.length > 0) {
+            const prepareAudio = async () => {
+                setIsPreparingAudio(true);
+                setAudioPrepError(null);
+                try {
+                    const urls = await Promise.all(
+                        dialogue.map(segment => 
+                            synthesizeSpeechGoogleCloud(segment.text, segment.lang, settings.voiceQuality)
+                                .then(audioContent => new Blob([Uint8Array.from(atob(audioContent), c => c.charCodeAt(0))], { type: 'audio/mpeg' }))
+                                .then(audioBlob => URL.createObjectURL(audioBlob))
+                        )
+                    );
+                    setAudioUrls(urls);
+                } catch (error) {
+                    console.error("Failed to prepare audio for dialogue:", error);
+                    setAudioPrepError("Fehler bei der Vorbereitung der Audiodateien. Die Übung kann nicht gestartet werden.");
+                } finally {
+                    setIsPreparingAudio(false);
+                }
+            };
+            prepareAudio();
+
+            return () => {
+                audioUrls.forEach(url => URL.revokeObjectURL(url));
+            };
+        }
+    }, [dialogue, settings.voiceQuality]);
+
 
     useEffect(() => {
         const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -894,7 +926,6 @@ const DialoguePractice = ({ settings, dialogue }: {
         recognition.current.onerror = (e: SpeechRecognitionErrorEvent) => {
             console.error("Recognition error:", e);
             if (practiceStateRef.current === 'recording') {
-                // If it errors during recording, stop gracefully.
                 handleRecordToggle();
             }
         };
@@ -902,32 +933,33 @@ const DialoguePractice = ({ settings, dialogue }: {
         return () => { recognition.current?.stop(); };
     }, []);
 
-    const playSegment = async (index: number) => {
+    const playSegment = (index: number) => {
         if (index >= dialogue.length) {
             setPracticeState('finished');
             handleTabChange('transcript');
             return;
         }
+         if (audioUrls.length === 0 || !audioUrls[index]) {
+            console.error(`Audio for segment ${index} is not available.`);
+            setPracticeState('waiting_for_record'); // Gracefully skip to recording
+            return;
+        }
+
         setSegmentIndex(index);
         setIsTextVisible(false);
         setPracticeState('playing');
         
-        try {
-            const segmentToPlay = dialogue[index];
-            const audioContent = await synthesizeSpeechGoogleCloud(segmentToPlay.text, segmentToPlay.lang, settings.voiceQuality);
-            const audioBlob = new Blob([Uint8Array.from(atob(audioContent), c => c.charCodeAt(0))], { type: 'audio/mpeg' });
-            const url = URL.createObjectURL(audioBlob);
-            if (audioRef.current) { audioRef.current.src = url; } 
-            else { audioRef.current = new Audio(url); }
-            
-            audioRef.current.onended = () => {
-                setPracticeState('waiting_for_record');
-            };
-            audioRef.current.play();
-        } catch (error) {
-            console.error("Speech synthesis failed:", error);
-            setPracticeState('waiting_for_record'); // Allow user to proceed even if TTS fails
-        }
+        const url = audioUrls[index];
+        if (audioRef.current) { audioRef.current.src = url; } 
+        else { audioRef.current = new Audio(url); }
+        
+        audioRef.current.onended = () => {
+            setPracticeState('waiting_for_record');
+        };
+        audioRef.current.play().catch(e => {
+            console.error("Audio playback failed:", e);
+            setPracticeState('waiting_for_record'); // Gracefully skip to recording
+        });
     };
     
     const handleRecordToggle = () => {
@@ -1059,9 +1091,15 @@ const DialoguePractice = ({ settings, dialogue }: {
                              )}
                         </div>
                         <div className="current-segment-display">
-                            {practiceState === 'idle' && <button className="btn btn-primary btn-large" onClick={handleStartPractice}>Übung starten</button>}
-                            {practiceState === 'playing' && <div className="spinner"></div>}
-                            {(practiceState === 'waiting_for_record' || practiceState === 'recording') && (
+                           {isPreparingAudio ? (
+                                <div className="placeholder"><div className="spinner"></div><p>Audiodateien werden vorbereitet...</p></div>
+                           ) : audioPrepError ? (
+                                <div className="placeholder"><h2>Fehler</h2><p>{audioPrepError}</p></div>
+                           ) : practiceState === 'idle' ? (
+                                <button className="btn btn-primary btn-large" onClick={handleStartPractice}>Übung starten</button>
+                           ) : practiceState === 'playing' ? (
+                                <div className="spinner"></div>
+                           ) : (practiceState === 'waiting_for_record' || practiceState === 'recording') ? (
                                 <div className="dialogue-text-container">
                                     {isTextVisible ? <p className="segment-text">{currentSegment?.text}</p> : <p className="segment-text-hidden">[Text verborgen]</p>}
                                     <p className="segment-text" style={{ minHeight: '2.5em' }}>
@@ -1069,8 +1107,9 @@ const DialoguePractice = ({ settings, dialogue }: {
                                         <em>{currentInterimTranscript}</em>
                                     </p>
                                 </div>
-                            )}
-                            {practiceState === 'finished' && <p>Übung abgeschlossen.</p>}
+                            ) : practiceState === 'finished' ? (
+                                <p>Übung abgeschlossen.</p>
+                            ) : null}
                         </div>
                     </div>
                 )}
