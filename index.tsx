@@ -1366,24 +1366,22 @@ const FeedbackDisplay = ({ feedback, isLoading, onGenerate, transcriptProvided }
   return (
     <div className="feedback-content">
         <h3>Bewertung</h3>
-        <table className="ratings-table">
-            <tbody>
-                <tr>
-                    <td>Inhaltliche Richtigkeit</td>
-                    <td><StarRating score={feedback.contentRating} maxScore={10} /> ({feedback.contentRating}/10)</td>
-                </tr>
-                <tr>
-                    <td colSpan={2} className="summary-cell">{feedback.contentSummary}</td>
-                </tr>
-                <tr>
-                    <td>Sprachliche Richtigkeit</td>
-                    <td><StarRating score={feedback.languageRating} maxScore={10} /> ({feedback.languageRating}/10)</td>
-                </tr>
-                 <tr>
-                    <td colSpan={2} className="summary-cell">{feedback.languageSummary}</td>
-                </tr>
-            </tbody>
-        </table>
+        <div className="ratings-container">
+            <div className="rating-item">
+                <div className="rating-header">
+                    <h4>Inhaltliche Richtigkeit</h4>
+                    <span><StarRating score={feedback.contentRating} maxScore={10} /> ({feedback.contentRating}/10)</span>
+                </div>
+                <p className="rating-summary">{feedback.contentSummary}</p>
+            </div>
+            <div className="rating-item">
+                <div className="rating-header">
+                    <h4>Sprachliche Richtigkeit</h4>
+                    <span><StarRating score={feedback.languageRating} maxScore={10} /> ({feedback.languageRating}/10)</span>
+                </div>
+                <p className="rating-summary">{feedback.languageSummary}</p>
+            </div>
+        </div>
 
         <h3>Fehleranalyse</h3>
         <ul className="error-analysis-list">

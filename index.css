@@ -463,25 +463,44 @@ textarea.form-control {
 .feedback-content {
     /* Styles for feedback content */
 }
-.ratings-table {
-    width: 100%;
-    max-width: 600px;
+.ratings-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
     margin: 1rem 0;
+}
+.rating-item {
+    background-color: #f8f9fa;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 1rem;
+}
+.rating-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap; /* Allow wrapping on small screens */
+    gap: 0.5rem;
+}
+.rating-header h4 {
+    margin: 0;
     font-size: 1rem;
-    border-collapse: collapse;
+    font-weight: 600;
 }
-.ratings-table td {
-    padding: 0.75rem 0.5rem;
-    vertical-align: middle;
-}
-.ratings-table td:first-child {
-    font-weight: 500;
-}
-.ratings-table td:last-child {
-    text-align: right;
+.rating-header span {
     font-weight: 500;
     white-space: nowrap;
 }
+.rating-summary {
+    font-size: 0.9rem;
+    font-style: italic;
+    color: var(--secondary-color);
+    margin: 0;
+    white-space: pre-wrap; /* Respect newlines and wrap text */
+    word-break: break-word; /* Break long words if necessary */
+}
+
 .star-rating {
     letter-spacing: 2px;
 }
@@ -492,18 +511,6 @@ textarea.form-control {
 .star.filled {
     color: #fdd835;
 }
-.ratings-table td.summary-cell {
-    padding-top: 0.25rem;
-    padding-bottom: 1.25rem;
-    font-size: 0.9rem;
-    font-style: italic;
-    color: var(--secondary-color);
-    border-bottom: 1px solid var(--border-color);
-}
-.ratings-table tr:last-child td.summary-cell {
-    border-bottom: none;
-}
-
 
 .error-analysis-list {
     list-style-type: none;
