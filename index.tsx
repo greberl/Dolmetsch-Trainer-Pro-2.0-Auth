@@ -187,7 +187,7 @@ const synthesizeSpeechGoogleCloud = async (text: string, lang: Language, quality
 };
 
 const adjustTextLength = async (initialText: string, settings: Settings): Promise<string> => {
-    const { speechLength, topic } = settings;
+    const { speechLength, topic, sourceLang } = settings;
     let target: { min: number; max: number; };
 
     if (settings.mode === 'Stegreifübersetzen') {
@@ -210,7 +210,7 @@ const adjustTextLength = async (initialText: string, settings: Settings): Promis
         if (currentText.length < target.min) {
             const diff = target.min - currentText.length;
             const paragraphsToAdd = diff > 800 ? 2 : 1;
-            adjustmentPrompt = `Der folgende Text zum Thema "${topic}" ist zu kurz. Aktuelle Länge: ${currentText.length} Zeichen. Ziel ist ${target.min}-${target.max} Zeichen. Bitte füge ${paragraphsToAdd} sinnvollen Absatz/Absätze hinzu, um den Text zu verlängern, aber bleibe im Stil des Originaltextes. Gib NUR den vollständigen, neuen Text aus.
+            adjustmentPrompt = `Der folgende Text zum Thema "${topic}" in der Sprache ${sourceLang} ist zu kurz. Aktuelle Länge: ${currentText.length} Zeichen. Ziel ist ${target.min}-${target.max} Zeichen. Bitte füge ${paragraphsToAdd} sinnvollen Absatz/Absätze hinzu, um den Text zu verlängern. Bleibe dabei unbedingt im Stil und in der Sprache (${sourceLang}) des Originaltextes. Gib NUR den vollständigen, neuen Text aus.
             
             Originaltext:
             """
@@ -219,7 +219,7 @@ const adjustTextLength = async (initialText: string, settings: Settings): Promis
         } else { // currentText.length > target.max
             const diff = currentText.length - target.max;
             const paragraphsToRemove = diff > 800 ? 2 : 1;
-            adjustmentPrompt = `Der folgende Text zum Thema "${topic}" ist zu lang. Aktuelle Länge: ${currentText.length} Zeichen. Ziel ist ${target.min}-${target.max} Zeichen. Bitte kürze den Text um ${paragraphsToRemove} Absatz/Absätze, ohne den Kerninhalt zu verlieren. Gib NUR den vollständigen, gekürzten Text aus.
+            adjustmentPrompt = `Der folgende Text zum Thema "${topic}" in der Sprache ${sourceLang} ist zu lang. Aktuelle Länge: ${currentText.length} Zeichen. Ziel ist ${target.min}-${target.max} Zeichen. Bitte kürze den Text um ${paragraphsToRemove} Absatz/Absätze, ohne den Kerninhalt zu verlieren. Stelle sicher, dass der gekürzte Text in der Sprache ${sourceLang} bleibt. Gib NUR den vollständigen, gekürzten Text aus.
 
             Originaltext:
             """
