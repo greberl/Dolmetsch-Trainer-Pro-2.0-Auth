@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI } from "@google/genai";
@@ -285,7 +286,14 @@ const App = () => {
             setOriginalText(adjustedText);
             setDialogue([]); // Ensure dialogue is cleared
         } else { // Gesprächsdolmetschen
-            const parsedDialogue = JSON.parse(generatedContent);
+            const jsonStart = generatedContent.indexOf('[');
+            const jsonEnd = generatedContent.lastIndexOf(']');
+            if (jsonStart === -1 || jsonEnd === -1) {
+                console.error("Generated content for dialogue does not contain a JSON array:", generatedContent);
+                throw new Error("AI response did not contain a valid JSON array for the dialogue.");
+            }
+            const jsonString = generatedContent.substring(jsonStart, jsonEnd + 1);
+            const parsedDialogue = JSON.parse(jsonString);
             setDialogue(parsedDialogue);
             setOriginalText(''); // Ensure original text is cleared
         }
