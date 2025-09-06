@@ -254,7 +254,7 @@ const App = () => {
     topic: "",
     qaLength: "2-4 Sätze",
     speechLength: "Kurz",
-    voiceQuality: "Premium",
+    voiceQuality: "Standard",
   });
   const [exerciseState, setExerciseState] = useState<'idle' | 'generating' | 'ready' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
