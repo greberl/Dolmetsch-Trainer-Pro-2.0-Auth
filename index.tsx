@@ -146,6 +146,21 @@ const generateContentWithRetry = async (prompt: string, retries = 3, delay = 100
     throw new Error("Failed to generate content after multiple retries.");
 };
 
+const punctuateTextWithAI = async (rawText: string, lang: Language): Promise<string> => {
+    if (!rawText || rawText.trim() === '') {
+        return rawText;
+    }
+    const prompt = `Füge dem folgenden Text auf ${lang} die korrekte Zeichensetzung (Punkte, Kommas, Fragezeichen usw.) hinzu. Ändere nicht die Wörter oder die Reihenfolge der Sätze. Gib NUR den vollständigen Text mit Zeichensetzung zurück.
+
+Originaltext:
+"""
+${rawText}
+"""`;
+
+    const punctuatedText = await generateContentWithRetry(prompt);
+    return punctuatedText.trim().replace(/^["']|["']$/g, '');
+};
+
 const synthesizeSpeechGoogleCloud = async (text: string, lang: Language, quality: VoiceQuality) => {
     const languageCode = LANG_MAP[lang];
     const voiceName = VOICE_MAP[lang][quality];
@@ -384,6 +399,7 @@ const SettingsPanel = ({ settings, setSettings, onStart, onFileUpload, isLoading
       if (settings.sourceType === 'upload' && settings.mode !== 'Gesprächsdolmetschen' && settings.mode !== 'Stegreifübersetzen') return null;
       
       const isMonologue = settings.mode === 'Vortragsdolmetschen' || settings.mode === 'Simultandolmetschen' || settings.mode === 'Shadowing';
+      const isDialogue = settings.mode === 'Gesprächsdolmetschen';
 
       return (
           <>
@@ -391,7 +407,7 @@ const SettingsPanel = ({ settings, setSettings, onStart, onFileUpload, isLoading
                   <label htmlFor="topic">Thema</label>
                   <input type="text" id="topic" className="form-control" value={settings.topic} onChange={e => handleSettingChange('topic', e.target.value)} />
               </div>
-              {settings.mode === 'Gesprächsdolmetschen' ? (
+              {isDialogue ? (
                   <div className="form-group">
                       <label htmlFor="qaLength">Satzlänge</label>
                       <select id="qaLength" className="form-control" value={settings.qaLength} onChange={e => handleSettingChange('qaLength', e.target.value)}>
@@ -535,7 +551,9 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
 }) => {
   const [activeTab, setActiveTab] = useState<PracticeAreaTab>('original');
   const [originalText, setOriginalText] = useState(initialText);
-  const [transcript, setTranscript] = useState('');
+  const [rawTranscript, setRawTranscript] = useState('');
+  const [displayTranscript, setDisplayTranscript] = useState<string | null>(null);
+  const [isPunctuating, setIsPunctuating] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -547,7 +565,6 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
   const targetLang = mode === 'shadowing' ? settings.sourceLang : settings.targetLang;
 
   useEffect(() => {
-    // Setup SpeechRecognition
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognitionAPI) {
         recognition.current = new SpeechRecognitionAPI();
@@ -556,23 +573,19 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
         recognition.current.lang = LANG_MAP[targetLang];
 
         recognition.current.onresult = (event: SpeechRecognitionEvent) => {
-            let interimTranscript = '';
             let finalTranscript = '';
             for (let i = event.resultIndex; i < event.results.length; ++i) {
                 if (event.results[i].isFinal) {
                     finalTranscript += event.results[i][0].transcript;
-                } else {
-                    interimTranscript += event.results[i][0].transcript;
                 }
             }
-             setTranscript(prev => prev + finalTranscript + interimTranscript);
+            setRawTranscript(prev => prev + finalTranscript);
         };
         recognition.current.onerror = (event: SpeechRecognitionErrorEvent) => {
             console.error("Speech recognition error", event.error, event.message);
             setIsRecording(false);
         };
         recognition.current.onend = () => {
-             // Do not stop recording automatically unless told to.
              if (isRecording) {
                  recognition.current?.start();
              }
@@ -582,6 +595,22 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
         console.warn("Speech Recognition API not supported in this browser.");
     }
   }, [targetLang, isRecording]);
+
+  const handleTabChange = async (tab: PracticeAreaTab) => {
+    setActiveTab(tab);
+    if (tab === 'transcript' && rawTranscript && displayTranscript === null && !isPunctuating) {
+        setIsPunctuating(true);
+        try {
+            const result = await punctuateTextWithAI(rawTranscript, targetLang);
+            setDisplayTranscript(result);
+        } catch (e) {
+            console.error("Punctuation failed:", e);
+            setDisplayTranscript(rawTranscript); // Fallback to raw transcript on error
+        } finally {
+            setIsPunctuating(false);
+        }
+    }
+  };
 
   const handlePlayPause = async () => {
     if (isPlaying) {
@@ -606,7 +635,6 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
     setIsPlaying(true);
 
     if (mode === 'simultaneous' || mode === 'shadowing') {
-        // Automatically start recording when playback starts for these modes
         handleRecord();
     }
   };
@@ -616,9 +644,9 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
       recognition.current?.stop();
       setIsRecording(false);
     } else {
-      if (mode === 'consecutive') {
-          setTranscript(''); // Clear previous transcript for new recording
-      }
+      setRawTranscript('');
+      setDisplayTranscript(null);
+      setFeedback(null);
       recognition.current?.start();
       setIsRecording(true);
     }
@@ -629,6 +657,9 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
   };
   
   const getFeedback = async () => {
+      const transcriptForFeedback = displayTranscript ?? rawTranscript;
+      if (!transcriptForFeedback) return;
+      
       setIsGeneratingFeedback(true);
       setFeedback(null);
       setActiveTab('feedback');
@@ -645,7 +676,7 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
 
         Verdolmetschung des Benutzers:
         """
-        ${transcript}
+        ${transcriptForFeedback}
         """
 
         Aufgabe: Analysiere die Verdolmetschung. Bewerte sie in den folgenden Kategorien von 1 (sehr schlecht) bis 5 (ausgezeichnet): Klarheit/Verständlichkeit, Genauigkeit, Vollständigkeit, Stil/Register, Terminologie. Gib auch eine Gesamtbewertung (1-5). Erstelle eine kurze Zusammenfassung (2-3 Sätze) der Leistung.
@@ -686,9 +717,9 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
   return (
     <div className="panel practice-area">
       <div className="tabs">
-        <button className={`tab-btn ${activeTab === 'original' ? 'active' : ''}`} onClick={() => setActiveTab('original')}>Originaltext</button>
-        <button className={`tab-btn ${activeTab === 'transcript' ? 'active' : ''}`} onClick={() => setActiveTab('transcript')}>Meine Verdolmetschung</button>
-        <button className={`tab-btn ${activeTab === 'feedback' ? 'active' : ''}`} onClick={() => setActiveTab('feedback')} disabled={!transcript}>Feedback</button>
+        <button className={`tab-btn ${activeTab === 'original' ? 'active' : ''}`} onClick={() => handleTabChange('original')}>Originaltext</button>
+        <button className={`tab-btn ${activeTab === 'transcript' ? 'active' : ''}`} onClick={() => handleTabChange('transcript')}>Meine Verdolmetschung</button>
+        <button className={`tab-btn ${activeTab === 'feedback' ? 'active' : ''}`} onClick={() => handleTabChange('feedback')} disabled={!rawTranscript}>Feedback</button>
       </div>
       <div className="tab-content">
         {activeTab === 'original' && (
@@ -715,7 +746,6 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
                     value={originalText}
                     onChange={(e) => {
                         setOriginalText(e.target.value);
-                        // Invalidate existing audio if text changes
                         if (audioRef.current) {
                             audioRef.current.pause();
                             setIsPlaying(false);
@@ -728,12 +758,19 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
           </>
         )}
         {activeTab === 'transcript' && (
-          <div className="text-area">
-            <textarea className="text-area-editor" value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Hier erscheint Ihre Verdolmetschung..." />
-          </div>
+            isPunctuating ? (
+                 <div className="loading-overlay" style={{ position: 'relative', background: 'transparent' }}>
+                    <div className="spinner"></div>
+                    <p>Transkript wird erstellt...</p>
+                 </div>
+            ) : (
+                 <div className="text-area">
+                    <textarea className="text-area-editor" value={displayTranscript ?? ''} onChange={(e) => setDisplayTranscript(e.target.value)} placeholder="Hier erscheint Ihre Verdolmetschung nach der Aufnahme..." />
+                 </div>
+            )
         )}
         {activeTab === 'feedback' && (
-             <FeedbackDisplay feedback={feedback} isLoading={isGeneratingFeedback} onGenerate={getFeedback} transcriptProvided={!!transcript} />
+             <FeedbackDisplay feedback={feedback} isLoading={isGeneratingFeedback} onGenerate={getFeedback} transcriptProvided={!!(displayTranscript ?? rawTranscript)} />
         )}
       </div>
       <div className="practice-footer">
@@ -754,6 +791,8 @@ const DialoguePractice = ({ settings, dialogue }: {
     const [segmentIndex, setSegmentIndex] = useState(0);
     const [dialogueState, setDialogueState] = useState<DialogueState>('synthesizing');
     const [dialogueResults, setDialogueResults] = useState<StructuredDialogueResult[]>([]);
+    const [processedResults, setProcessedResults] = useState<StructuredDialogueResult[] | null>(null);
+    const [isProcessingResults, setIsProcessingResults] = useState(false);
     const [currentTranscript, setCurrentTranscript] = useState('');
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const recognition = useRef<SpeechRecognition | null>(null);
@@ -764,70 +803,67 @@ const DialoguePractice = ({ settings, dialogue }: {
     const isUserTurn = currentSegment?.lang === settings.targetLang;
 
     useEffect(() => {
-        // Automatically start the first segment synthesis
         if (segmentIndex === 0 && dialogueState === 'synthesizing') {
             synthesizeAndPlayCurrentSegment();
         }
     }, [segmentIndex, dialogueState, dialogue]);
     
-    // Speech Recognition Setup
     useEffect(() => {
-        if (!currentSegment) return; // Guard against running when dialogue is finished
-
+        if (!currentSegment) return;
         const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognitionAPI) {
-            console.warn("Speech Recognition not supported.");
-            return;
-        }
-
+        if (!SpeechRecognitionAPI) { console.warn("Speech Recognition not supported."); return; }
         const rec = new SpeechRecognitionAPI();
         rec.continuous = true;
         rec.interimResults = true;
         rec.lang = LANG_MAP[targetLang];
-
         rec.onresult = (event: SpeechRecognitionEvent) => {
-            let interim = '';
             let final = '';
             for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) {
-                    final += event.results[i][0].transcript;
-                } else {
-                    interim += event.results[i][0].transcript;
-                }
+                if (event.results[i].isFinal) { final += event.results[i][0].transcript; }
             }
-            setCurrentTranscript(prev => prev + final + interim);
+            setCurrentTranscript(prev => prev + final);
         };
-        
         rec.onerror = (e) => console.error("Recognition error:", e);
-        rec.onend = () => {
-            if (dialogueState === 'recording') {
-                handleNextSegment();
-            }
-        };
-
+        rec.onend = () => { if (dialogueState === 'recording') { handleNextSegment(); } };
         recognition.current = rec;
-
-        return () => {
-            rec.onresult = () => {};
-            rec.onend = () => {};
-            rec.onerror = () => {};
-            rec.stop();
-        };
-
+        return () => { rec.stop(); };
     }, [targetLang, dialogueState, currentSegment]);
 
-    // Main state machine for dialogue flow
     useEffect(() => {
         if (dialogueState === 'recording' && recognition.current) {
             setCurrentTranscript('');
             recognition.current.start();
         }
     }, [dialogueState]);
+    
+     useEffect(() => {
+        const processResults = async () => {
+            if (dialogueResults.length === 0 || processedResults) return;
+            setIsProcessingResults(true);
+            try {
+                const promises = dialogueResults.map(r => punctuateTextWithAI(r.userInterpretation, r.interpretationLang));
+                const punctuatedTexts = await Promise.all(promises);
+                const newResults = dialogueResults.map((result, index) => ({
+                    ...result,
+                    userInterpretation: punctuatedTexts[index]
+                }));
+                setProcessedResults(newResults);
+            } catch (error) {
+                console.error("Failed to punctuate dialogue results:", error);
+                setProcessedResults(dialogueResults); // Fallback to raw results
+            } finally {
+                setIsProcessingResults(false);
+            }
+        };
+
+        if (activeTab === 'results') {
+            processResults();
+        }
+    }, [activeTab, dialogueResults, processedResults]);
 
 
     const synthesizeAndPlayCurrentSegment = async () => {
         if (!currentSegment) return;
-        
         setDialogueState('synthesizing');
         try {
             const audioContent = await synthesizeSpeechGoogleCloud(currentSegment.text, currentSegment.lang, settings.voiceQuality);
@@ -835,19 +871,12 @@ const DialoguePractice = ({ settings, dialogue }: {
             const url = URL.createObjectURL(audioBlob);
             audioRef.current = new Audio(url);
             audioRef.current.onended = () => {
-                // After participant B speaks, it's user's turn
-                 if (isUserTurn) {
-                     setDialogueState('waiting_for_record');
-                 } else { // After participant A speaks, it's user's turn
-                     setDialogueState('recording');
-                 }
+                 if (isUserTurn) { setDialogueState('waiting_for_record'); } 
+                 else { setDialogueState('recording'); }
             };
             setDialogueState('playing');
             audioRef.current.play();
-        } catch (error) {
-            console.error("Speech synthesis failed:", error);
-            // Decide how to handle this error - maybe try again or show an error message
-        }
+        } catch (error) { console.error("Speech synthesis failed:", error); }
     };
     
     const handleNextSegment = () => {
@@ -861,7 +890,7 @@ const DialoguePractice = ({ settings, dialogue }: {
         const nextIndex = segmentIndex + 1;
         if (nextIndex < dialogue.length) {
             setSegmentIndex(nextIndex);
-            setDialogueState('synthesizing'); // Explicitly set state for next segment
+            setDialogueState('synthesizing');
             synthesizeAndPlayCurrentSegment();
         } else {
             setDialogueState('finished');
@@ -871,10 +900,7 @@ const DialoguePractice = ({ settings, dialogue }: {
     
     const handleRecordClick = () => {
         if (dialogueState === 'recording') {
-             if (recognition.current) {
-                recognition.current.stop();
-            }
-            // onEnd will trigger handleNextSegment
+             if (recognition.current) { recognition.current.stop(); }
         } else if (dialogueState === 'waiting_for_record') {
             setDialogueState('recording');
         }
@@ -901,7 +927,14 @@ const DialoguePractice = ({ settings, dialogue }: {
                     <button className="tab-btn active">Ergebnisse</button>
                 </div>
                 <div className="tab-content">
-                    <StructuredTranscript results={dialogueResults} />
+                    {isProcessingResults ? (
+                        <div className="loading-overlay" style={{ position: 'relative', background: 'transparent' }}>
+                            <div className="spinner"></div>
+                            <p>Ergebnisse werden aufbereitet...</p>
+                        </div>
+                    ) : (
+                        <StructuredTranscript results={processedResults || []} />
+                    )}
                 </div>
             </div>
         )
@@ -916,7 +949,7 @@ const DialoguePractice = ({ settings, dialogue }: {
                 {dialogueState === 'playing' ? (
                      <p className="segment-text">{currentSegment?.text}</p>
                 ) : dialogueState === 'recording' || dialogueState === 'waiting_for_record' ? (
-                    <p className="segment-text">{currentTranscript || "..."}</p>
+                     <p className="segment-text">{currentTranscript ? `"${currentTranscript}"` : "..."}</p>
                 ) : (
                     <div className="spinner"></div>
                 )}
@@ -945,6 +978,8 @@ const SightTranslationPractice = ({ settings, dialogue }: {
     const [isEditing, setIsEditing] = useState(false);
     const [segmentIndex, setSegmentIndex] = useState(0);
     const [dialogueResults, setDialogueResults] = useState<StructuredDialogueResult[]>([]);
+    const [processedResults, setProcessedResults] = useState<StructuredDialogueResult[] | null>(null);
+    const [isProcessingResults, setIsProcessingResults] = useState(false);
     const [currentTranscript, setCurrentTranscript] = useState('');
     const [isRecording, setIsRecording] = useState(false);
     const recognition = useRef<SpeechRecognition | null>(null);
@@ -952,8 +987,7 @@ const SightTranslationPractice = ({ settings, dialogue }: {
 
     const currentSegment = editableDialogue[segmentIndex];
     const targetLang = currentSegment?.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang;
-    
-    // Handlers for editing
+
     const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         const newText = e.target.value;
         const updatedDialogue = [...editableDialogue];
@@ -961,74 +995,56 @@ const SightTranslationPractice = ({ settings, dialogue }: {
         setEditableDialogue(updatedDialogue);
     };
 
-    const handleEditToggle = () => {
-        setIsEditing(prev => !prev);
-    };
+    const handleEditToggle = () => setIsEditing(prev => !prev);
 
-    // Speech Recognition Setup
     useEffect(() => {
-        if (!currentSegment) return; // Guard against running when dialogue is finished
-
+        if (!currentSegment) return;
         const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognitionAPI) {
-            console.warn("Speech Recognition not supported.");
-            return;
-        }
-
+        if (!SpeechRecognitionAPI) { console.warn("Speech Recognition not supported."); return; }
         const rec = new SpeechRecognitionAPI();
         rec.continuous = true;
-        rec.interimResults = true;
+        rec.interimResults = false;
         rec.lang = LANG_MAP[targetLang];
-
         rec.onresult = (event: SpeechRecognitionEvent) => {
-            let interim = '';
             let final = '';
             for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) {
-                    final += event.results[i][0].transcript;
-                } else {
-                    interim += event.results[i][0].transcript;
-                }
+                if (event.results[i].isFinal) { final += event.results[i][0].transcript; }
             }
-            setCurrentTranscript(prev => prev + final + interim);
+            setCurrentTranscript(prev => prev + final);
         };
-        
-        rec.onerror = (e) => {
-            console.error("Recognition error:", e);
-            setIsRecording(false);
-        };
-        rec.onend = () => {
-             if (isRecordingRef.current) { // If it stops unexpectedly, restart it
-                rec.start();
-             }
-        };
-
+        rec.onerror = (e) => { console.error("Recognition error:", e); setIsRecording(false); };
+        rec.onend = () => { if (isRecordingRef.current) { rec.start(); } };
         recognition.current = rec;
-        
-        return () => {
-            rec.onresult = () => {};
-            rec.onend = () => {};
-            rec.onerror = () => {};
-            if (rec) {
-                isRecordingRef.current = false; // Prevent restart on manual stop
-                rec.stop();
-            }
-        };
-
+        return () => { isRecordingRef.current = false; rec.stop(); };
     }, [targetLang, currentSegment]);
     
-    // useRef to get the latest isRecording state in the onend callback
     const isRecordingRef = useRef(isRecording);
-    useEffect(() => {
-        isRecordingRef.current = isRecording;
-    }, [isRecording]);
+    useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
 
+     useEffect(() => {
+        const processResults = async () => {
+            if (dialogueResults.length === 0 || processedResults) return;
+            setIsProcessingResults(true);
+            try {
+                const promises = dialogueResults.map(r => punctuateTextWithAI(r.userInterpretation, r.interpretationLang));
+                const punctuatedTexts = await Promise.all(promises);
+                const newResults = dialogueResults.map((result, index) => ({ ...result, userInterpretation: punctuatedTexts[index] }));
+                setProcessedResults(newResults);
+            } catch (error) {
+                console.error("Failed to punctuate sight translation results:", error);
+                setProcessedResults(dialogueResults); // Fallback
+            } finally {
+                setIsProcessingResults(false);
+            }
+        };
+
+        if (activeTab === 'results') {
+            processResults();
+        }
+    }, [activeTab, dialogueResults, processedResults]);
 
     const handleNextSegment = () => {
-        if (isRecording) { // Stop recording before moving on
-            handleRecordClick();
-        }
-        
+        if (isRecording) { handleRecordClick(); }
         if (!currentSegment) return;
          setDialogueResults(prev => [...prev, {
             originalSegment: currentSegment,
@@ -1047,7 +1063,7 @@ const SightTranslationPractice = ({ settings, dialogue }: {
     
     const handleRecordClick = () => {
        if (isRecording) {
-           isRecordingRef.current = false; // Signal that this is a manual stop
+           isRecordingRef.current = false;
            recognition.current?.stop();
            setIsRecording(false);
        } else {
@@ -1057,32 +1073,27 @@ const SightTranslationPractice = ({ settings, dialogue }: {
        }
     };
 
-    if (!currentSegment) {
-         return (
-             <div className="panel practice-area">
-                <div className="tabs">
-                    <button className="tab-btn" onClick={() => setActiveTab('practice')}>Übung</button>
-                    <button className="tab-btn active">Ergebnisse</button>
-                </div>
-                <div className="tab-content">
-                    <StructuredTranscript results={dialogueResults} />
-                </div>
+    const renderResults = () => (
+        <div className="panel practice-area">
+            <div className="tabs">
+                <button className="tab-btn" onClick={() => setActiveTab('practice')}>Übung</button>
+                <button className="tab-btn active">Ergebnisse</button>
             </div>
-        )
-    }
+            <div className="tab-content">
+                {isProcessingResults ? (
+                    <div className="loading-overlay" style={{ position: 'relative', background: 'transparent' }}>
+                        <div className="spinner"></div>
+                        <p>Ergebnisse werden aufbereitet...</p>
+                    </div>
+                ) : (
+                    <StructuredTranscript results={processedResults || dialogueResults} />
+                )}
+            </div>
+        </div>
+    );
 
-    if (activeTab === 'results') {
-        return (
-             <div className="panel practice-area">
-                <div className="tabs">
-                    <button className="tab-btn" onClick={() => setActiveTab('practice')}>Übung</button>
-                    <button className="tab-btn active">Ergebnisse</button>
-                </div>
-                <div className="tab-content">
-                    <StructuredTranscript results={dialogueResults} />
-                </div>
-            </div>
-        )
+    if (!currentSegment || activeTab === 'results') {
+        return renderResults();
     }
 
     return (
@@ -1106,7 +1117,7 @@ const SightTranslationPractice = ({ settings, dialogue }: {
                 />
             </div>
             <div className="text-area" style={{ height: '150px', marginTop: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius)', padding: '1rem', backgroundColor: '#f8f9fa' }}>
-                <p>{currentTranscript || "..."}</p>
+                <p>{currentTranscript ? `"${currentTranscript}"` : "..."}</p>
             </div>
             
             <div className="practice-footer">
