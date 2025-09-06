@@ -102,6 +102,12 @@ const MODES: InterpretingMode[] = ["Vortragsdolmetschen", "Simultandolmetschen",
 const QA_LENGTHS: QALength[] = ["1-3 Sätze", "2-4 Sätze", "3-5 Sätze", "4-6 Sätze"];
 const SPEECH_LENGTHS: SpeechLength[] = ["Kurz", "Mittel", "Prüfung"];
 
+const SPEECH_LENGTH_TARGETS: Record<SpeechLength, { min: number; max: number }> = {
+  "Kurz": { min: 1200, max: 1600 },
+  "Mittel": { min: 1800, max: 2200 },
+  "Prüfung": { min: 3300, max: 3700 },
+};
+
 const LANG_MAP: Record<Language, string> = {
   "Deutsch": "de-DE",
   "Englisch": "en-US",
@@ -165,6 +171,52 @@ const synthesizeSpeechGoogleCloud = async (text: string, lang: Language, quality
     }
 };
 
+const adjustTextLength = async (initialText: string, settings: Settings): Promise<string> => {
+    const { speechLength, topic } = settings;
+    const target = SPEECH_LENGTH_TARGETS[speechLength];
+    let currentText = initialText;
+    let attempts = 0;
+    const MAX_ADJUSTMENT_ATTEMPTS = 3;
+
+    while (
+        (currentText.length < target.min || currentText.length > target.max) &&
+        attempts < MAX_ADJUSTMENT_ATTEMPTS
+    ) {
+        attempts++;
+        let adjustmentPrompt = '';
+
+        if (currentText.length < target.min) {
+            const diff = target.min - currentText.length;
+            const paragraphsToAdd = diff > 800 ? 2 : 1;
+            adjustmentPrompt = `Der folgende Text zum Thema "${topic}" ist zu kurz. Aktuelle Länge: ${currentText.length} Zeichen. Ziel ist ${target.min}-${target.max} Zeichen. Bitte füge ${paragraphsToAdd} sinnvollen Absatz/Absätze hinzu, um den Text zu verlängern, aber bleibe im Stil des Originaltextes. Gib NUR den vollständigen, neuen Text aus.
+            
+            Originaltext:
+            """
+            ${currentText}
+            """`;
+        } else { // currentText.length > target.max
+            const diff = currentText.length - target.max;
+            const paragraphsToRemove = diff > 800 ? 2 : 1;
+            adjustmentPrompt = `Der folgende Text zum Thema "${topic}" ist zu lang. Aktuelle Länge: ${currentText.length} Zeichen. Ziel ist ${target.min}-${target.max} Zeichen. Bitte kürze den Text um ${paragraphsToRemove} Absatz/Absätze, ohne den Kerninhalt zu verlieren. Gib NUR den vollständigen, gekürzten Text aus.
+
+            Originaltext:
+            """
+            ${currentText}
+            """`;
+        }
+
+        console.log(`Adjustment attempt ${attempts}: Current length ${currentText.length}, target ${target.min}-${target.max}. Adjusting...`);
+        currentText = await generateContentWithRetry(adjustmentPrompt);
+    }
+
+    if (attempts >= MAX_ADJUSTMENT_ATTEMPTS) {
+        console.warn(`Could not adjust text to target length after ${MAX_ADJUSTMENT_ATTEMPTS} attempts. Using last generated text.`);
+    }
+
+    return currentText;
+};
+
+
 // --- REACT COMPONENTS ---
 const App = () => {
   const [settings, setSettings] = useState<Settings>({
@@ -188,19 +240,24 @@ const App = () => {
     setErrorMessage('');
     try {
       let prompt = '';
-      if (settings.mode === 'Gesprächsdolmetschen' || settings.mode === 'Stegreifübersetzen') {
-          prompt = `Erstelle einen realistischen Dialog zwischen zwei Personen (A und B) zum Thema "${settings.topic}". Der Dialog soll im Frage-Antwort-Format sein. Person A (${settings.sourceLang}) stellt Fragen, Person B (${settings.targetLang}) antwortet. Der Dialog soll insgesamt 4 Segmente haben (A-Frage, B-Antwort, A-Frage, B-Antwort). Jedes Segment soll eine Länge von "${settings.qaLength}" haben. Gib nur den reinen Dialog aus, ohne zusätzliche Erklärungen, formatiert als JSON-Array mit Objekten, die "type", "text" und "lang" enthalten. Beispiel: [{"type": "Frage", "text": "...", "lang": "${settings.sourceLang}"}, ...]`;
-      } else {
-          prompt = `Erstelle einen Text zum Thema "${settings.topic}" für eine Dolmetschübung im Modus "${settings.mode}". Die Sprache des Textes soll ${settings.sourceLang} sein. Die Länge soll dem Level "${settings.speechLength}" entsprechen. Gib nur den reinen Text aus, ohne Titel oder zusätzliche Kommentare.`;
-      }
-      const text = await generateContentWithRetry(prompt);
+      const isMonologueMode = settings.mode === 'Vortragsdolmetschen' || settings.mode === 'Simultandolmetschen' || settings.mode === 'Shadowing';
 
-      if (settings.mode === 'Gesprächsdolmetschen' || settings.mode === 'Stegreifübersetzen') {
-          const parsedDialogue = JSON.parse(text);
-          setDialogue(parsedDialogue);
-      } else {
-          setOriginalText(text);
+      if (isMonologueMode) {
+          prompt = `Erstelle einen Text zum Thema "${settings.topic}" für eine Dolmetschübung im Modus "${settings.mode}". Die Sprache des Textes soll ${settings.sourceLang} sein. Die Länge soll dem Level "${settings.speechLength}" entsprechen. Gib nur den reinen Text aus, ohne Titel oder zusätzliche Kommentare.`;
+      } else { // Gesprächsdolmetschen or Stegreifübersetzen
+          prompt = `Erstelle einen realistischen Dialog zwischen zwei Personen (A und B) zum Thema "${settings.topic}". Der Dialog soll im Frage-Antwort-Format sein. Person A (${settings.sourceLang}) stellt Fragen, Person B (${settings.targetLang}) antwortet. Der Dialog soll insgesamt 4 Segmente haben (A-Frage, B-Antwort, A-Frage, B-Antwort). Jedes Segment soll eine Länge von "${settings.qaLength}" haben. Gib nur den reinen Dialog aus, ohne zusätzliche Erklärungen, formatiert als JSON-Array mit Objekten, die "type", "text" und "lang" enthalten. Beispiel: [{"type": "Frage", "text": "...", "lang": "${settings.sourceLang}"}, ...]`;
       }
+      
+      const generatedContent = await generateContentWithRetry(prompt);
+
+      if (isMonologueMode) {
+          const adjustedText = await adjustTextLength(generatedContent, settings);
+          setOriginalText(adjustedText);
+      } else {
+          const parsedDialogue = JSON.parse(generatedContent);
+          setDialogue(parsedDialogue);
+      }
+
       setExerciseState('ready');
       setExerciseId(Date.now()); // Reset exercise with new ID
     } catch (error) {
