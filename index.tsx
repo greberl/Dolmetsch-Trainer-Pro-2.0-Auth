@@ -187,7 +187,8 @@ const synthesizeSpeechGoogleCloud = async (text: string, lang: Language, quality
 };
 
 const adjustTextLength = async (initialText: string, settings: Settings): Promise<string> => {
-    const { speechLength, topic, sourceLang } = settings;
+    const { speechLength, topic, sourceLang, mode } = settings;
+    const isMonologueMode = mode === 'Vortragsdolmetschen' || mode === 'Simultandolmetschen' || mode === 'Shadowing';
     let target: { min: number; max: number; };
 
     if (settings.mode === 'Stegreifübersetzen') {
@@ -210,7 +211,11 @@ const adjustTextLength = async (initialText: string, settings: Settings): Promis
         if (currentText.length < target.min) {
             const diff = target.min - currentText.length;
             const paragraphsToAdd = diff > 800 ? 2 : 1;
-            adjustmentPrompt = `Der folgende Text zum Thema "${topic}" in der Sprache ${sourceLang} ist zu kurz. Aktuelle Länge: ${currentText.length} Zeichen. Ziel ist ${target.min}-${target.max} Zeichen. Bitte füge ${paragraphsToAdd} sinnvollen Absatz/Absätze hinzu, um den Text zu verlängern. Bleibe dabei unbedingt im Stil und in der Sprache (${sourceLang}) des Originaltextes. Gib NUR den vollständigen, neuen Text aus.
+            let actionPrompt = `Bitte füge ${paragraphsToAdd} sinnvollen Absatz/Absätze hinzu, um den Text zu verlängern.`;
+            if (isMonologueMode) {
+                actionPrompt = `Bitte füge ${paragraphsToAdd} sinnvollen Absatz/Absätze in der Mitte des Textes hinzu, um ihn zu verlängern. Die Anrede am Anfang und die Schlussformel am Ende müssen unbedingt erhalten bleiben.`;
+            }
+            adjustmentPrompt = `Der folgende ${isMonologueMode ? 'Vortrag' : 'Text'} zum Thema "${topic}" in der Sprache ${sourceLang} ist zu kurz. Aktuelle Länge: ${currentText.length} Zeichen. Ziel ist ${target.min}-${target.max} Zeichen. ${actionPrompt} Bleibe dabei unbedingt im Stil und in der Sprache (${sourceLang}) des Originaltextes. Gib NUR den vollständigen, neuen Text aus.
             
             Originaltext:
             """
@@ -219,7 +224,11 @@ const adjustTextLength = async (initialText: string, settings: Settings): Promis
         } else { // currentText.length > target.max
             const diff = currentText.length - target.max;
             const paragraphsToRemove = diff > 800 ? 2 : 1;
-            adjustmentPrompt = `Der folgende Text zum Thema "${topic}" in der Sprache ${sourceLang} ist zu lang. Aktuelle Länge: ${currentText.length} Zeichen. Ziel ist ${target.min}-${target.max} Zeichen. Bitte kürze den Text um ${paragraphsToRemove} Absatz/Absätze, ohne den Kerninhalt zu verlieren. Stelle sicher, dass der gekürzte Text in der Sprache ${sourceLang} bleibt. Gib NUR den vollständigen, gekürzten Text aus.
+            let actionPrompt = `Bitte kürze den Text um ${paragraphsToRemove} Absatz/Absätze, ohne den Kerninhalt zu verlieren.`;
+            if (isMonologueMode) {
+                actionPrompt = `Bitte kürze den Text um ${paragraphsToRemove} Absatz/Absätze aus der Mitte des Textes, ohne den Kerninhalt zu verlieren. Die Anrede am Anfang und die Schlussformel am Ende müssen unbedingt erhalten bleiben.`;
+            }
+            adjustmentPrompt = `Der folgende ${isMonologueMode ? 'Vortrag' : 'Text'} zum Thema "${topic}" in der Sprache ${sourceLang} ist zu lang. Aktuelle Länge: ${currentText.length} Zeichen. Ziel ist ${target.min}-${target.max} Zeichen. ${actionPrompt} Stelle sicher, dass der gekürzte Text in der Sprache ${sourceLang} bleibt. Gib NUR den vollständigen, gekürzten Text aus.
 
             Originaltext:
             """
@@ -266,7 +275,7 @@ const App = () => {
         const isSightTranslationMode = settings.mode === 'Stegreifübersetzen';
 
         if (isMonologueMode) {
-            prompt = `Erstelle einen Text zum Thema "${settings.topic}" für eine Dolmetschübung im Modus "${settings.mode}". Die Sprache des Textes soll ${settings.sourceLang} sein. Die Länge soll dem Level "${settings.speechLength}" entsprechen. Gib nur den reinen Text aus, ohne Titel oder zusätzliche Kommentare.`;
+            prompt = `Erstelle einen Vortrag zum Thema "${settings.topic}" für eine Dolmetschübung im Modus "${settings.mode}". Die Sprache des Vortrags soll ${settings.sourceLang} sein. Die Länge soll dem Level "${settings.speechLength}" entsprechen. Der Vortrag muss mit einer passenden Anrede für das Publikum beginnen (z.B. "Sehr geehrte Damen und Herren", "Liebe Freunde", "Verehrte Gäste") und mit einer Schlussformel enden (z.B. "Vielen Dank für Ihre Aufmerksamkeit"). Gib nur den reinen Vortragstext aus, ohne Titel oder zusätzliche Kommentare.`;
         } else if (isSightTranslationMode) {
             prompt = `Erstelle einen zusammenhängenden Text zum Thema "${settings.topic}" in ${settings.sourceLang} für eine Stegreifübersetzungs-Übung. Der Text soll eine Länge zwischen 1280 und 1420 Zeichen haben. Gib nur den reinen Text aus, ohne Titel oder zusätzliche Kommentare.`;
         } else { // Gesprächsdolmetschen
