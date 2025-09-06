@@ -173,7 +173,14 @@ const synthesizeSpeechGoogleCloud = async (text: string, lang: Language, quality
 
 const adjustTextLength = async (initialText: string, settings: Settings): Promise<string> => {
     const { speechLength, topic } = settings;
-    const target = SPEECH_LENGTH_TARGETS[speechLength];
+    let target: { min: number; max: number; };
+
+    if (settings.mode === 'Stegreifübersetzen') {
+        target = { min: 1280, max: 1420 };
+    } else {
+        target = SPEECH_LENGTH_TARGETS[speechLength];
+    }
+
     let currentText = initialText;
     let attempts = 0;
     const MAX_ADJUSTMENT_ATTEMPTS = 3;
@@ -239,27 +246,38 @@ const App = () => {
     setExerciseState('generating');
     setErrorMessage('');
     try {
-      let prompt = '';
-      const isMonologueMode = settings.mode === 'Vortragsdolmetschen' || settings.mode === 'Simultandolmetschen' || settings.mode === 'Shadowing';
+        let prompt = '';
+        const isMonologueMode = settings.mode === 'Vortragsdolmetschen' || settings.mode === 'Simultandolmetschen' || settings.mode === 'Shadowing';
+        const isSightTranslationMode = settings.mode === 'Stegreifübersetzen';
 
-      if (isMonologueMode) {
-          prompt = `Erstelle einen Text zum Thema "${settings.topic}" für eine Dolmetschübung im Modus "${settings.mode}". Die Sprache des Textes soll ${settings.sourceLang} sein. Die Länge soll dem Level "${settings.speechLength}" entsprechen. Gib nur den reinen Text aus, ohne Titel oder zusätzliche Kommentare.`;
-      } else { // Gesprächsdolmetschen or Stegreifübersetzen
-          prompt = `Erstelle einen realistischen Dialog zwischen zwei Personen (A und B) zum Thema "${settings.topic}". Der Dialog soll im Frage-Antwort-Format sein. Person A (${settings.sourceLang}) stellt Fragen, Person B (${settings.targetLang}) antwortet. Der Dialog soll insgesamt 4 Segmente haben (A-Frage, B-Antwort, A-Frage, B-Antwort). Jedes Segment soll eine Länge von "${settings.qaLength}" haben. Gib nur den reinen Dialog aus, ohne zusätzliche Erklärungen, formatiert als JSON-Array mit Objekten, die "type", "text" und "lang" enthalten. Beispiel: [{"type": "Frage", "text": "...", "lang": "${settings.sourceLang}"}, ...]`;
-      }
-      
-      const generatedContent = await generateContentWithRetry(prompt);
+        if (isMonologueMode) {
+            prompt = `Erstelle einen Text zum Thema "${settings.topic}" für eine Dolmetschübung im Modus "${settings.mode}". Die Sprache des Textes soll ${settings.sourceLang} sein. Die Länge soll dem Level "${settings.speechLength}" entsprechen. Gib nur den reinen Text aus, ohne Titel oder zusätzliche Kommentare.`;
+        } else if (isSightTranslationMode) {
+            prompt = `Erstelle einen zusammenhängenden Text zum Thema "${settings.topic}" in ${settings.sourceLang} für eine Stegreifübersetzungs-Übung. Der Text soll eine Länge zwischen 1280 und 1420 Zeichen haben. Gib nur den reinen Text aus, ohne Titel oder zusätzliche Kommentare.`;
+        } else { // Gesprächsdolmetschen
+            prompt = `Erstelle einen realistischen Dialog zwischen zwei Personen (A und B) zum Thema "${settings.topic}". Der Dialog soll im Frage-Antwort-Format sein. Person A (${settings.sourceLang}) stellt Fragen, Person B (${settings.targetLang}) antwortet. Der Dialog soll insgesamt 4 Segmente haben (A-Frage, B-Antwort, A-Frage, B-Antwort). Jedes Segment soll eine Länge von "${settings.qaLength}" haben. Gib nur den reinen Dialog aus, ohne zusätzliche Erklärungen, formatiert als JSON-Array mit Objekten, die "type", "text" und "lang" enthalten. Beispiel: [{"type": "Frage", "text": "...", "lang": "${settings.sourceLang}"}, ...]`;
+        }
+  
+        const generatedContent = await generateContentWithRetry(prompt);
 
-      if (isMonologueMode) {
-          const adjustedText = await adjustTextLength(generatedContent, settings);
-          setOriginalText(adjustedText);
-      } else {
-          const parsedDialogue = JSON.parse(generatedContent);
-          setDialogue(parsedDialogue);
-      }
+        if (isMonologueMode) {
+            const adjustedText = await adjustTextLength(generatedContent, settings);
+            setOriginalText(adjustedText);
+        } else if (isSightTranslationMode) {
+            const adjustedText = await adjustTextLength(generatedContent, settings);
+            const sightTranslationDialogue: DialogueSegment[] = [{
+                type: 'Frage', // Type is arbitrary for sight translation, just to match the data structure
+                text: adjustedText,
+                lang: settings.sourceLang,
+            }];
+            setDialogue(sightTranslationDialogue);
+        } else { // Gesprächsdolmetschen
+            const parsedDialogue = JSON.parse(generatedContent);
+            setDialogue(parsedDialogue);
+        }
 
-      setExerciseState('ready');
-      setExerciseId(Date.now()); // Reset exercise with new ID
+        setExerciseState('ready');
+        setExerciseId(Date.now()); // Reset exercise with new ID
     } catch (error) {
       console.error(error);
       setErrorMessage("Fehler bei der Erstellung der Übung. Bitte versuchen Sie es erneut.");
