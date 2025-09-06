@@ -361,18 +361,26 @@ const SettingsPanel = ({ settings, setSettings, onStart, onFileUpload, isLoading
   const [fileName, setFileName] = useState('');
 
   const handleSettingChange = (field: keyof Settings, value: string) => {
-    // Basic validation to prevent incompatible language settings
-    if (field === 'sourceLang' && value === settings.targetLang) {
-      // Find a new target language that is not the selected source language
-      const newTargetLang = LANGUAGES.find(l => l !== value) || LANGUAGES[1];
-      setSettings({ ...settings, [field]: value, targetLang: newTargetLang });
-    } else if (field === 'targetLang' && value === settings.sourceLang) {
-       // Find a new source language that is not the selected target language
-      const newSourceLang = LANGUAGES.find(l => l !== value) || LANGUAGES[0];
-      setSettings({ ...settings, [field]: value, sourceLang: newSourceLang });
-    } else {
-      setSettings({ ...settings, [field]: value });
+    const newSettings = { ...settings, [field]: value };
+
+    // Rule 1: If mode is set to Shadowing, force targetLang to match sourceLang
+    if (field === 'mode' && value === 'Shadowing') {
+        newSettings.targetLang = newSettings.sourceLang;
+    } 
+    // Rule 2: If sourceLang is changed while in Shadowing mode, force targetLang to match
+    else if (field === 'sourceLang' && newSettings.mode === 'Shadowing') {
+        newSettings.targetLang = value as Language;
     }
+    // Rule 3: Prevent source and target from being the same in non-Shadowing modes
+    else if (field === 'sourceLang' && value === newSettings.targetLang && newSettings.mode !== 'Shadowing') {
+        const newTargetLang = LANGUAGES.find(l => l !== value) || LANGUAGES[1];
+        newSettings.targetLang = newTargetLang;
+    } 
+    else if (field === 'targetLang' && value === newSettings.sourceLang && newSettings.mode !== 'Shadowing') {
+        const newSourceLang = LANGUAGES.find(l => l !== value) || LANGUAGES[0];
+        newSettings.sourceLang = newSourceLang;
+    }
+    setSettings(newSettings);
   };
 
   const handleFileSelect = () => {
@@ -470,7 +478,7 @@ const SettingsPanel = ({ settings, setSettings, onStart, onFileUpload, isLoading
             </div>
             <div className="form-group">
                 <label htmlFor="targetLang">Zielsprache</label>
-                <select id="targetLang" className="form-control" value={settings.targetLang} onChange={e => handleSettingChange('targetLang', e.target.value as Language)}>
+                <select id="targetLang" className="form-control" value={settings.targetLang} onChange={e => handleSettingChange('targetLang', e.target.value as Language)} disabled={settings.mode === 'Shadowing'}>
                     {LANGUAGES.map(lang => <option key={lang} value={lang}>{lang}</option>)}
                 </select>
             </div>
