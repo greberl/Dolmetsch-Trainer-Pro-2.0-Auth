@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI } from "@google/genai";
@@ -601,6 +602,12 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
   const targetLang = mode === 'shadowing' ? settings.sourceLang : settings.targetLang;
 
   useEffect(() => {
+    if (audioRef.current) {
+        audioRef.current.playbackRate = settings.playbackRate;
+    }
+  }, [settings.playbackRate]);
+
+  useEffect(() => {
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognitionAPI) {
         recognition.current = new SpeechRecognitionAPI();
@@ -884,6 +891,12 @@ const DialoguePractice = ({ settings, dialogue }: {
 
     const currentSegment = dialogue[segmentIndex];
     const targetLang = currentSegment?.lang === settings.sourceLang ? settings.targetLang : settings.sourceLang;
+
+    useEffect(() => {
+        if (audioRef.current) {
+            audioRef.current.playbackRate = settings.playbackRate;
+        }
+    }, [settings.playbackRate]);
 
     useEffect(() => {
         if (dialogue && dialogue.length > 0) {
