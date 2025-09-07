@@ -74,6 +74,7 @@ interface Settings {
   qaLength: QALength;
   speechLength: SpeechLength;
   voiceQuality: VoiceQuality;
+  playbackRate: number;
 }
 
 interface ErrorAnalysisItem {
@@ -255,6 +256,7 @@ const App = () => {
     qaLength: "2-4 Sätze",
     speechLength: "Kurz",
     voiceQuality: "Standard",
+    playbackRate: 1.0,
   });
   const [exerciseState, setExerciseState] = useState<'idle' | 'generating' | 'ready' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -361,7 +363,11 @@ const SettingsPanel = ({ settings, setSettings, onStart, onFileUpload, isLoading
   const [fileName, setFileName] = useState('');
 
   const handleSettingChange = (field: keyof Settings, value: string) => {
-    const newSettings = { ...settings, [field]: value };
+    const newSettings: any = { ...settings, [field]: value };
+
+    if (field === 'playbackRate') {
+        newSettings.playbackRate = parseFloat(value);
+    }
 
     // Rule 1: If mode is set to Shadowing, force targetLang to match sourceLang
     if (field === 'mode' && value === 'Shadowing') {
@@ -492,6 +498,21 @@ const SettingsPanel = ({ settings, setSettings, onStart, onFileUpload, isLoading
                     <option value="Standard">Standard</option>
                     <option value="Premium">Premium (bessere Qualität)</option>
                 </select>
+            </div>
+            )}
+            {settings.mode !== 'Stegreifübersetzen' && (
+             <div className="form-group">
+                <label htmlFor="playbackRate">Lesegeschwindigkeit: {settings.playbackRate.toFixed(1)}x</label>
+                <input
+                    type="range"
+                    id="playbackRate"
+                    className="form-range"
+                    min="0.5"
+                    max="1.5"
+                    step="0.1"
+                    value={settings.playbackRate}
+                    onChange={e => handleSettingChange('playbackRate', e.target.value)}
+                />
             </div>
             )}
         </div>
@@ -646,6 +667,7 @@ const MonologuePractice = ({ settings, originalText: initialText, mode }: {
             return;
         }
     }
+    audioRef.current.playbackRate = settings.playbackRate;
     audioRef.current.play();
     setIsPlaying(true);
 
@@ -953,6 +975,7 @@ const DialoguePractice = ({ settings, dialogue }: {
         if (audioRef.current) { audioRef.current.src = url; } 
         else { audioRef.current = new Audio(url); }
         
+        audioRef.current.playbackRate = settings.playbackRate;
         audioRef.current.onended = () => {
             setPracticeState('waiting_for_record');
         };
