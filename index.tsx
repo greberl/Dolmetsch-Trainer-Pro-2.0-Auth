@@ -248,6 +248,17 @@ const adjustTextLength = async (initialText: string, settings: Settings): Promis
 
 // --- REACT COMPONENTS ---
 const App = () => {
+  const [isAuthorized, setIsAuthorized] = useState<boolean>(false);
+  const [accessCode, setAccessCode] = useState<string>('');
+  
+  const handleAuthorization = () => {
+    if (accessCode === 'IFA2526') {
+      setIsAuthorized(true);
+    } else {
+      alert('Ungültiger Zugangscode. Bitte versuchen Sie es erneut.');
+    }
+  };
+
   const [settings, setSettings] = useState<Settings>({
     mode: "Vortragsdolmetschen",
     sourceLang: "Deutsch",
@@ -325,6 +336,31 @@ const App = () => {
     };
     reader.readAsText(file);
   };
+
+  if (!isAuthorized) {
+    return (
+      <div className="auth-container">
+        <div className="auth-box">
+          <h1>Dolmetsch-Trainer Pro 2.0</h1>
+          <p>Bitte geben Sie Ihren Zugangscode ein:</p>
+          <input
+            type="text"
+            value={accessCode}
+            onChange={(e) => setAccessCode(e.target.value)}
+            placeholder="Zugangscode eingeben"
+            onKeyPress={(e) => e.key === 'Enter' && handleAuthorization()}
+          />
+          <button onClick={handleAuthorization}>Anmelden</button>
+          <p className="auth-info">
+            Sie haben noch keinen Zugangscode? Bitte wenden Sie sich an{' '}
+            <a href="mailto:roland.kleiber@ifa.fau.de?subject=Zugangscode%20Dolmetsch-Trainer-App">
+              roland.kleiber@ifa.fau.de
+            </a>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
